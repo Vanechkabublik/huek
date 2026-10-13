@@ -1,5 +1,5 @@
 // HTTP-эндпоинты авторизации:
-//   POST /auth/register  — регистрация (публичный), сразу логинит
+//   POST /auth/register  — регистрация (публичный), токен НЕ выдаёт
 //   POST /auth/login     — логин (публичный)
 //   POST /auth/logout    — выход (публичный: удалить cookie можно и с протухшим токеном)
 //   GET  /auth/me        — текущий пользователь (нужен токен)
@@ -21,11 +21,8 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  register(
-    @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    return this.authService.register(dto, res);
+  register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
   }
 
   @Public()

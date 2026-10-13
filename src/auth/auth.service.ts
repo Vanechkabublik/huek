@@ -1,7 +1,8 @@
 // Логика авторизации: регистрация, логин, логаут.
 //
 // Схема простая — ОДИН access-токен (JWT), без refresh-токенов:
-//   - при логине/регистрации подписываем JWT с id пользователя;
+//   - регистрация только создаёт пользователя, токен НЕ выдаёт — дальше нужно залогиниться;
+//   - при логине подписываем JWT с id пользователя;
 //   - кладём его в httpOnly cookie (JS на фронте её не видит → не утащить через XSS),
 //     браузер сам шлёт её с каждым запросом (на фронте нужен credentials: 'include');
 //   - тот же токен возвращаем в ответе — на случай, если клиенту удобнее заголовок
@@ -41,7 +42,7 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
-  async register(dto: RegisterDto, res: Response) {
+  async register(dto: RegisterDto) {
     const email = dto.email.toLowerCase();
 
     if (await this.users.existsBy({ email })) {
@@ -59,7 +60,9 @@ export class AuthService {
       }),
     );
 
-    return this.authorize(user, res);
+    // Токен не выдаём — только данные юзера (без хеша пароля).
+    const { password: _password, ...safeUser } = user;
+    return { user: safeUser };
   }
 
   async login(dto: LoginDto, res: Response) {
@@ -76,17 +79,6 @@ export class AuthService {
       throw new UnauthorizedException('Неверный email или пароль');
     }
 
-    return this.authorize(user, res);
-  }
-
-  logout(res: Response) {
-    // JWT нельзя "отозвать" на сервере — просто удаляем cookie у клиента.
-    res.clearCookie(ACCESS_COOKIE, this.cookieOptions());
-    return { success: true };
-  }
-
-  // Общий финал логина и регистрации: выпустить токен, поставить cookie, отдать юзера.
-  private async authorize(user: User, res: Response) {
     const payload: JwtPayload = { sub: user.id };
     const accessToken = await this.jwt.signAsync(payload);
 
@@ -100,6 +92,12 @@ export class AuthService {
     // Хеш пароля наружу не отдаём.
     const { password: _password, ...safeUser } = user;
     return { accessToken, user: safeUser };
+  }
+
+  logout(res: Response) {
+    // JWT нельзя "отозвать" на сервере — просто удаляем cookie у клиента.
+    res.clearCookie(ACCESS_COOKIE, this.cookieOptions());
+    return { success: true };
   }
 
   private cookieOptions() {
