@@ -1,7 +1,22 @@
 # Боевой запуск за HTTPS (Caddy + автоматический сертификат Let's Encrypt):
-#   cp .env.prod.example .env   # заполните DOMAIN, ACME_EMAIL, DB_PASS
+#   cp .env.prod.example .env   # заполните DOMAIN, ACME_EMAIL, DB_PASS, APP_SECRET
 #   docker compose -f docker-compose.prod.yml up -d --build
-# Наружу открыты только порты 80 и 443 (Caddy). Приложение и БД снаружи недоступны.
+# Наружу открыты только порты 80 и 443 (Caddy). Приложение, WebSocket и БД снаружи недоступны.
+x-app-env: &app-env
+  DB_HOST: db
+  DB_NAME: ${DB_NAME:-ads}
+  DB_USER: ${DB_USER:-ads_user}
+  DB_PASS: ${DB_PASS:?Укажите DB_PASS в .env}
+  APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+  APP_DEBUG: "0"
+  APP_DEMO: ${APP_DEMO:-0}
+  APP_SECRET: ${APP_SECRET:-}
+  APP_URL: ${APP_URL:-https://${DOMAIN:-localhost}}
+  VK_CLIENT_ID: ${VK_CLIENT_ID:-}
+  VK_SCOPE: ${VK_SCOPE:-}
+  WS_PORT: "8081"
+  WS_PUBLIC_URL: ${WS_PUBLIC_URL:-}
+
 services:
   caddy:
     image: caddy:2
@@ -19,6 +34,7 @@ services:
       - caddy_config:/config
     depends_on:
       - app
+      - ws
 
   app:
     build:
@@ -29,16 +45,31 @@ services:
       - "80"
     volumes:
       - ./:/var/www/html
-    environment:
-      DB_HOST: db
-      DB_NAME: ${DB_NAME:-ads}
-      DB_USER: ${DB_USER:-ads_user}
-      DB_PASS: ${DB_PASS:?Укажите DB_PASS в .env}
-      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
-      APP_DEBUG: "0"
+    environment: *app-env
     depends_on:
       db:
         condition: service_healthy
+
+  # WebSocket чата: Caddy / nginx проксируют на него путь /ws
+  ws:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    restart: unless-stopped
+    command: ["php", "bin/ws-server.php"]
+    expose:
+      - "8081"
+    volumes:
+      - ./:/var/www/html
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8081/health') === 'ok' ? 0 : 1);"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   db:
     image: postgres:16
@@ -50,7 +81,6 @@ services:
       TZ: ${APP_TIMEZONE:-Europe/Moscow}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./docker/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s

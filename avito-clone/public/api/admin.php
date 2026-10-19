@@ -55,6 +55,9 @@ switch (Request::action('dashboard')) {
     case 'stats':
         Response::ok(['stats' => Admin::stats()]);
 
+    case 'integrations':
+        Response::ok(Admin::integrations());
+
     // ----- пользователи
     case 'users':
         Response::ok(Admin::users(Request::str('q'), Request::str('filter', 'all'), max(1, Request::int('page', 1))));

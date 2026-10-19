@@ -3,8 +3,9 @@
 Схема:
 
 ```
-Интернет ──443/80──▶ Caddy (SSL, Let's Encrypt) ──▶ app (PHP) ──▶ db (PostgreSQL)
-                      единственный открытый порт      внутри docker-сети, снаружи недоступны
+Интернет ──443/80──▶ Caddy (SSL, Let's Encrypt) ──┬─ /      ─▶ app (PHP: сайт и API) ──▶ db (PostgreSQL)
+                      единственный открытый порт   └─ /ws    ─▶ ws  (WebSocket чата)  ──▶ db
+                                                   app, ws и db снаружи недоступны
 ```
 
 Caddy сам получает сертификат, продлевает его и перенаправляет `http → https`. Ничего настраивать вручную (certbot, cron) не нужно.
@@ -51,8 +52,11 @@ cp .env.prod.example .env
 nano .env
 ```
 
-Заполните `DOMAIN`, `ACME_EMAIL` и `DB_PASS` (пароль БД — длинный и случайный: `openssl rand -base64 24`).
+Заполните `DOMAIN`, `ACME_EMAIL`, `DB_PASS` (пароль БД — длинный и случайный: `openssl rand -base64 24`) и `APP_SECRET`
+(`openssl rand -hex 32` — подпись тикетов WebSocket-чата).
 **Пароль БД задайте до первого запуска** — он записывается в том `pg_data` один раз.
+
+Вход через VK подключается отдельно и необязателен — см. [docs/VK_LOGIN.md](docs/VK_LOGIN.md) (там же, где взять ключи).
 
 ## 5. Запуск
 
@@ -63,30 +67,48 @@ docker compose -f docker-compose.prod.yml logs -f caddy      # ждём «certif
 
 Откройте **https://board.example.com**.
 
-## 6. Обязательно после первого запуска
+## 6. Первый администратор
 
-В базе лежат демо-данные с известными паролями (`admin@example.com / admin123` и т. д.). На публичном сайте их надо убрать:
+Демо-данные (пользователи Иван и Мария с известными паролями, тестовые объявления и чаты) заливаются **только** при `APP_DEMO=1`;
+на боевом сервере в `.env` оставьте `APP_DEMO=0` — тогда после первого запуска создаются лишь категории с характеристиками.
+Создайте администратора:
 
-1. **Сменить пароль админа:**
-   ```bash
-   docker compose -f docker-compose.prod.yml exec app php bin/set-password.php admin@example.com 'ВашНадёжныйПароль'
-   ```
-   (минимум 8 символов; пароль останется в истории команд shell — после смены можно очистить её командой `history -c`).
-2. Войти в `/admin.php` → **Пользователи** → удалить демо-пользователей Иван и Мария (их объявления удалятся вместе с ними).
-3. При желании переименуйте/отредактируйте категории в разделе **Категории**.
+```bash
+docker compose -f docker-compose.prod.yml exec app php bin/create-admin.php you@example.com 'ВашНадёжныйПароль' 'Ваше имя'
+```
 
-Кнопки быстрого входа с демо-паролями на странице входа на боевом сервере не показываются (они включаются только переменной `APP_DEMO=1`).
+(пароль — минимум 8 символов; он останется в истории команд shell — после создания можно очистить её командой `history -c`).
+Эта же команда делает администратором уже существующего пользователя и сбрасывает ему пароль. Сменить пароль админа позже:
+`docker compose -f docker-compose.prod.yml exec app php bin/set-password.php you@example.com 'НовыйПароль'`.
+
+Затем зайдите в `/admin.php`. Раздел **Интеграции** показывает состояние входа через VK и WebSocket-чата, подсказывает, какие значения
+вписать в кабинете VK, и предупреждает, если на боевом сервере остались включены демо-режим или отладка.
+
+**Если на сервере уже есть демо-данные** (база создана прежней версией проекта или с `APP_DEMO=1`): в админке → **Пользователи** удалите
+Ивана и Марию (их объявления, чаты и отзывы удалятся вместе с ними) и смените пароль демо-админа `admin@example.com`
+(`bin/set-password.php`, как выше) — либо создайте своего администратора и удалите демо-админа.
 
 ## Обновление сайта
 
+**Сайт за nginx на хосте** (вариант Б ниже) — одна команда: тянет код, дописывает недостающие настройки в `.env`
+(в том числе генерирует `APP_SECRET`), пересобирает контейнеры, добавляет в nginx блок `/ws`, проверяет конфиг и перезагружает nginx:
+
 ```bash
-cd huek/avito-clone
+cd ~/huek/avito-clone && bash bin/server-update.sh
+```
+
+**Сайт за Caddy:**
+
+```bash
+cd ~/huek/avito-clone
 git pull
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 Данные (БД, фото, сертификаты) лежат в томах `pg_data`, `caddy_data` и в папке `public/uploads` — при обновлении они сохраняются.
-Схема БД применяется только при первом создании тома; если в будущем схема изменится, понадобится миграция вручную.
+**Схема БД обновляется сама:** при каждом старте контейнер `app` выполняет `bin/migrate.php`, который применяет новые файлы из
+`database/migrations/` (уже применённые пропускает; журнал — таблица `schema_migrations`). Старая база, созданная прежней версией
+проекта, распознаётся и дообновляется без потери объявлений и сообщений (прежняя переписка переносится в новый чат).
 
 ## Резервные копии
 
@@ -106,6 +128,7 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
 |---|---|
 | Браузер пишет «небезопасно» / нет сертификата | Смотрите `logs caddy`. Чаще всего: DNS ещё не указывает на сервер, закрыты 80/443, домен за «оранжевым облаком» Cloudflare, либо исчерпан лимит Let's Encrypt (5 неудачных попыток в час — подождите). |
 | `address already in use` на 80/443 | Порты заняты nginx/Apache — см. раздел «Порты 80/443 заняты» ниже. |
+| Чат без мгновенной доставки, внизу баннер «Нет соединения в реальном времени» | Не проксируется `/ws` (в nginx нет блока `location /ws`, см. ниже) или не запущен контейнер `ws`: `docker compose -f docker-compose.prod.yml ps`, `logs --tail=50 ws`. Сообщения при этом всё равно доходят — опросом раз в 5 секунд. |
 | Сайт открывается, но вход «сбрасывается» | Проверьте, что заходите по `https://` (cookie помечается `Secure`, когда Caddy передаёт `X-Forwarded-Proto: https`). |
 | Фото не загружаются | Лимит 5 МБ на файл; папка `public/uploads` должна быть доступна на запись (`ls -ld public/uploads`). |
 | Ошибка 500 | `docker compose -f docker-compose.prod.yml logs --tail=100 app`. Для подробностей временно добавьте `APP_DEBUG: "1"` в `docker-compose.prod.yml` (не оставляйте включённым). |
@@ -119,9 +142,9 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
 
 **Вариант Б — оставить nginx** и пустить сайт через него (Caddy не нужен):
 
-1. Запустите только `app` и `db`; приложение будет слушать лишь `127.0.0.1:8080`:
+1. Запустите `app`, `ws` и `db`; сайт будет слушать лишь `127.0.0.1:8080`, WebSocket — `127.0.0.1:8081`:
    ```bash
-   docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d --build app db
+   docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d --build app ws db
    docker compose -f docker-compose.prod.yml rm -sf caddy      # убрать неудавшийся контейнер Caddy
    ```
 2. Конфиг nginx (`/etc/nginx/sites-available/board`, затем `sudo ln -s /etc/nginx/sites-available/board /etc/nginx/sites-enabled/`):
@@ -131,6 +154,18 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
        server_name board.example.com;
        client_max_body_size 12m;
 
+       # WebSocket чата — обязательно ДО location /
+       location /ws {
+           proxy_pass http://127.0.0.1:8081;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-For $remote_addr;
+           proxy_read_timeout 3600s;
+           proxy_send_timeout 3600s;
+       }
+
        location / {
            proxy_pass http://127.0.0.1:8080;
            proxy_set_header Host $host;
@@ -139,6 +174,7 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
        }
    }
    ```
+   Если конфиг уже настроен (certbot добавил https), блок `/ws` можно вставить автоматически: `bash bin/server-update.sh`.
 3. Проверить и применить: `sudo nginx -t && sudo systemctl reload nginx`.
 4. Сертификат: `sudo apt install -y certbot python3-certbot-nginx && sudo certbot --nginx -d board.example.com`
    (certbot сам допишет https и редирект и настроит автопродление).

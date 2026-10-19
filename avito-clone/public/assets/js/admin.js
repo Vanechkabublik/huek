@@ -1,6 +1,6 @@
 /* ==========================================================================
    Админ-панель (hash-роутер): дашборд, пользователи, объявления, категории и их характеристики,
-   отзывы, журнал действий. Общие помощники берутся из window.Board (app.js).
+   отзывы, журнал действий, интеграции. Общие помощники берутся из window.Board (app.js).
    ========================================================================== */
 (() => {
     'use strict';
@@ -730,9 +730,79 @@
             await load();
         }
 
+        /* --------------------------------------------------------------------- интеграции */
+
+        async function copyText(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+            } catch {
+                const t = el('textarea', { style: { position: 'fixed', opacity: '0' } });
+                t.value = text;
+                document.body.append(t);
+                t.select();
+                try { document.execCommand('copy'); } catch { /* нет доступа к буферу */ }
+                t.remove();
+            }
+            toast('Скопировано', 'success', 1500);
+        }
+
+        /** Строка «значение + кнопка копирования». */
+        const copyBox = (text, { block = false } = {}) => el('div', { class: `copybox${block ? ' copybox--block' : ''}` },
+            el('code', {}, text),
+            el('button', { class: 'btn btn--outline btn--xs', type: 'button', onClick: () => copyText(text) }, 'Копировать'));
+
+        async function viewIntegrations() {
+            const d = await adminApi('integrations');
+            const vk = d.vk;
+            const yesNo = (ok, yes, no) => pill(ok ? 'active' : 'pending', ok ? yes : no);
+
+            const vkSteps = el('ol', { class: 'steps' },
+                el('li', {}, 'Откройте ', el('a', { href: 'https://id.vk.ru/about/business/go', target: '_blank', rel: 'noopener' }, 'кабинет VK ID для бизнеса'),
+                    ' и войдите своим аккаунтом VK (если попросят — создайте профиль бизнеса, это бесплатно).'),
+                el('li', {}, 'Раздел «Мои приложения» → «Добавить приложение». Платформа — ', el('b', {}, 'Web'), '.'),
+                el('li', {}, 'Поле «Базовый домен»: ', copyBox(vk.base_domain)),
+                el('li', {}, 'Поле «Доверенный Redirect URL»: ', copyBox(vk.redirect_uri), el('small', { class: 'muted' }, 'Ровно так — с https и путём, без лишних символов.')),
+                el('li', {}, 'Создайте приложение. В карточке: «Приложение» → «Информация о приложении» → ', el('b', {}, 'ID приложения'), ' (это число).'),
+                el('li', {}, 'На сервере выполните (подставьте свой ID):', copyBox('cd ~/huek/avito-clone && VK_CLIENT_ID=ВАШ_ID bash bin/server-update.sh', { block: true }),
+                    el('small', { class: 'muted' }, 'Защищённый и сервисный ключи VK сайту не нужны — никому их не показывайте.')));
+
+            const vkCard = el('div', { class: 'panel-card' },
+                el('div', { class: 'panel-card__head' }, el('h2', {}, 'Вход через VK'), yesNo(vk.enabled, 'Включён', 'Не настроен')),
+                vk.enabled
+                    ? el('dl', { class: 'kv' },
+                        el('dt', {}, 'ID приложения'), el('dd', {}, el('code', {}, vk.client_id)),
+                        el('dt', {}, 'Redirect URL'), el('dd', {}, copyBox(vk.redirect_uri)),
+                        el('dt', {}, 'Базовый домен'), el('dd', {}, copyBox(vk.base_domain)),
+                        el('dt', {}, 'Права'), el('dd', {}, el('code', {}, vk.scope)),
+                        el('dt', {}, 'Вошли через VK'), el('dd', {}, `${vk.users} ${plural(vk.users, 'пользователь', 'пользователя', 'пользователей')}`))
+                    : el('p', { class: 'muted' }, 'Пока ID приложения не задан, кнопки «Войти через VK» на сайте скрыты. Как подключить:'),
+                !vk.https ? el('p', { class: 'note note--warn' }, 'Сайт открыт не по https — VK принимает боевые Redirect URL только с https (для проверки на компьютере используйте домен localhost).') : null,
+                vk.enabled ? el('details', { class: 'fold' }, el('summary', {}, 'Где лежат настройки приложения VK'), vkSteps) : vkSteps,
+                el('p', { class: 'muted' }, 'Подробная инструкция с разбором ошибок: файл docs/VK_LOGIN.md в репозитории.'));
+
+            const wsCard = el('div', { class: 'panel-card' },
+                el('div', { class: 'panel-card__head' }, el('h2', {}, 'Чат в реальном времени (WebSocket)'), yesNo(d.ws.ok, 'Работает', 'Не отвечает')),
+                el('dl', { class: 'kv' },
+                    el('dt', {}, 'Адрес для браузера'), el('dd', {}, d.ws.public_url)),
+                d.ws.ok ? null : el('p', { class: 'note note--warn' }, 'WebSocket-сервер не отвечает. Чат продолжит работать (сообщения подтянутся опросом раз в несколько секунд), но без мгновенной доставки. Проверьте контейнер ws: docker compose logs --tail=50 ws'));
+
+            const sys = d.app;
+            const sysCard = el('div', { class: 'panel-card' },
+                el('div', { class: 'panel-card__head' }, el('h2', {}, 'Окружение')),
+                el('dl', { class: 'kv' },
+                    el('dt', {}, 'Адрес сайта'), el('dd', {}, sys.url),
+                    el('dt', {}, 'PHP'), el('dd', {}, sys.php),
+                    el('dt', {}, 'PostgreSQL'), el('dd', {}, sys.db),
+                    el('dt', {}, 'APP_SECRET'), el('dd', {}, sys.secret_set ? pill('active', 'задан') : pill('pending', 'не задан — подпись выводится из пароля БД')),
+                    el('dt', {}, 'Демо-режим'), el('dd', {}, sys.demo ? pill('pending', 'включён — на боевом сервере выключите (APP_DEMO=0)') : pill('active', 'выключен')),
+                    el('dt', {}, 'Отладка'), el('dd', {}, sys.debug ? pill('pending', 'включена — выключите (APP_DEBUG=0)') : pill('active', 'выключена'))));
+
+            content.replaceChildren(header('Интеграции', 'Вход через VK, чат и состояние сервера'), el('div', { class: 'stack' }, vkCard, wsCard, sysCard));
+        }
+
         /* --------------------------------------------------------------------- роутер */
 
-        const routes = { stats: viewStats, users: viewUsers, ads: viewAds, categories: viewCategories, reviews: viewReviews, audit: viewAudit };
+        const routes = { stats: viewStats, users: viewUsers, ads: viewAds, categories: viewCategories, reviews: viewReviews, audit: viewAudit, integrations: viewIntegrations };
         let routeToken = 0;
 
         async function route() {

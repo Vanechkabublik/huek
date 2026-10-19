@@ -28,7 +28,9 @@ final class Realtime
 
     private static function secret(): string
     {
-        return (string) (getenv('APP_SECRET') ?: 'dev-secret-change-me');
+        $secret = (string) getenv('APP_SECRET');
+        // Не задан — выводим из пароля БД: он общий у app и ws, но не публичный
+        return $secret !== '' ? $secret : hash('sha256', 'board-ws|' . (getenv('DB_PASS') ?: 'ads_pass') . '|' . (getenv('DB_NAME') ?: 'ads'));
     }
 
     private static function b64(string $raw): string

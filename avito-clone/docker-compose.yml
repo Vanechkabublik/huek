@@ -1,4 +1,20 @@
 # Доска объявлений — запуск: docker compose up -d --build  →  http://localhost:8080
+# Сервисы: app (сайт), ws (WebSocket чата), db (PostgreSQL 16), adminer (по желанию: --profile tools)
+x-app-env: &app-env
+  DB_HOST: db
+  DB_NAME: ${DB_NAME:-ads}
+  DB_USER: ${DB_USER:-ads_user}
+  DB_PASS: ${DB_PASS:-ads_pass}
+  APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+  APP_DEBUG: ${APP_DEBUG:-0}
+  APP_DEMO: ${APP_DEMO:-1}             # 1 — демо-данные и кнопки быстрого входа с демо-паролями
+  APP_SECRET: ${APP_SECRET:-}          # подпись WebSocket-тикетов (пусто — выводится из DB_PASS)
+  APP_URL: ${APP_URL:-}                # публичный адрес сайта, нужен для входа через VK
+  VK_CLIENT_ID: ${VK_CLIENT_ID:-}      # App ID из кабинета VK ID (см. docs/VK_LOGIN.md); пусто — кнопки VK скрыты
+  VK_SCOPE: ${VK_SCOPE:-}              # права VK; по умолчанию vkid.personal_info (имя и фото), «vkid.personal_info email» — ещё и email
+  WS_PORT: "8081"
+  WS_PUBLIC_URL: ${WS_PUBLIC_URL:-}    # пусто: по http — ws://хост:8081, по https — wss://домен/ws
+
 services:
   app:
     build:
@@ -11,17 +27,31 @@ services:
       # Весь проект (DocumentRoot — ./public). Фото лежат в ./public/uploads и
       # переживают пересборку контейнера, т.к. это обычная папка на хосте.
       - ./:/var/www/html
-    environment:
-      DB_HOST: db
-      DB_NAME: ${DB_NAME:-ads}
-      DB_USER: ${DB_USER:-ads_user}
-      DB_PASS: ${DB_PASS:-ads_pass}
-      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
-      APP_DEBUG: ${APP_DEBUG:-0}
-      APP_DEMO: ${APP_DEMO:-1}      # 1 — на странице входа кнопки быстрого входа с демо-паролями
+    environment: *app-env
     depends_on:
       db:
         condition: service_healthy
+
+  # WebSocket-сервер чата (тот же образ, другая команда). Миграции БД выполняет сервис app.
+  ws:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: board-ws
+    command: ["php", "bin/ws-server.php"]
+    ports:
+      - "${WS_PORT:-8081}:8081"
+    volumes:
+      - ./:/var/www/html
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8081/health') === 'ok' ? 0 : 1);"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   db:
     image: postgres:16
@@ -33,11 +63,9 @@ services:
       TZ: ${APP_TIMEZONE:-Europe/Moscow}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      # *.sql из этой папки выполняются один раз — при первом создании тома pg_data
-      - ./docker/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # -h 127.0.0.1: во время инициализации Postgres слушает только unix-сокет,
-      # поэтому проверка по TCP проходит лишь когда init-скрипты уже выполнены
+      # поэтому проверка по TCP проходит лишь когда сервер полностью запущен
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
@@ -49,7 +77,7 @@ services:
     container_name: board-adminer
     profiles: ["tools"]          # docker compose --profile tools up -d
     ports:
-      - "${ADMINER_PORT:-8081}:8080"
+      - "${ADMINER_PORT:-8082}:8080"
     environment:
       ADMINER_DEFAULT_SERVER: db
     depends_on:

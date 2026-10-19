@@ -435,7 +435,8 @@
             if (!APP.user || ws) return;
             try {
                 const { ticket, url, port } = await apiGet('chat', { action: 'ticket' });
-                const base = url || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${port}`;
+                // По HTTPS WebSocket проксируется тем же доменом по пути /ws (Caddy/nginx); по HTTP (разработка) — прямой порт
+                const base = url || (location.protocol === 'https:' ? `wss://${location.host}/ws` : `ws://${location.hostname}:${port}`);
                 ws = new WebSocket(`${base}${base.includes('?') ? '&' : '?'}ticket=${encodeURIComponent(ticket)}`);
             } catch {
                 scheduleReconnect();

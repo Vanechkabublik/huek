@@ -3,11 +3,12 @@
 FROM alpine:3.20
 
 # pdo_pgsql — PostgreSQL, gd — ресайз/перекодирование фото, exif — поворот по EXIF,
-# mbstring/fileinfo/session/ctype — используются приложением, su-exec — запуск без root.
-RUN apk add --no-cache php83 php83-pdo_pgsql php83-gd php83-exif php83-mbstring php83-fileinfo php83-session php83-ctype su-exec \
+# mbstring/fileinfo/session/ctype — используются приложением, curl — обращения к API VK ID,
+# su-exec — запуск без root.
+RUN apk add --no-cache php83 php83-pdo_pgsql php83-gd php83-exif php83-mbstring php83-fileinfo php83-session php83-ctype php83-curl su-exec \
     && ln -sf /usr/bin/php83 /usr/bin/php \
     && adduser -D -H -s /sbin/nologin app \
-    && php -r 'foreach (["pdo_pgsql","gd","exif","mbstring","fileinfo","session","ctype","filter","json"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "Не загружено расширение PHP: $e\n"); exit(1); } }' \
+    && php -r 'foreach (["pdo_pgsql","gd","exif","mbstring","fileinfo","session","ctype","filter","json","curl"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "Не загружено расширение PHP: $e\n"); exit(1); } }' \
     && php -v
 
 COPY docker/php/php.ini /etc/php83/conf.d/99-app.ini

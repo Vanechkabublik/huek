@@ -1,7 +1,11 @@
 # Дополнение к docker-compose.prod.yml для сервера, где порты 80/443 уже заняты вашим nginx:
-# приложение публикуется только на 127.0.0.1:8080, а Caddy не запускается.
-#   docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d --build app db
+# сайт публикуется на 127.0.0.1:8080, WebSocket — на 127.0.0.1:8081, а Caddy не запускается.
+#   docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d --build app ws db
+# nginx проксирует / → 127.0.0.1:8080 и /ws → 127.0.0.1:8081 (см. DEPLOY.md).
 services:
   app:
     ports:
       - "127.0.0.1:8080:80"
+  ws:
+    ports:
+      - "127.0.0.1:8081:8081"

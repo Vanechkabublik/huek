@@ -1279,3 +1279,18 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 .cell-user { display: flex; align-items: center; gap: 12px; }
 .admin-title__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .attr-def .row-actions { flex-wrap: nowrap; }
+
+/* ---- Админка: интеграции ------------------------------------------------ */
+.stack { display: grid; gap: 16px; max-width: 860px; }
+.stack .panel-card { margin-bottom: 0; }
+.copybox { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; margin: 4px 0; padding: 6px 6px 6px 12px; border: 1px solid var(--border-2); border-radius: var(--r-btn); background: var(--bg-soft); }
+.copybox code { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.copybox--block { display: flex; }
+.copybox--block code { flex: 1; }
+.steps { margin: 14px 0 0; padding-left: 22px; display: grid; gap: 14px; line-height: 1.5; }
+.steps li::marker { color: var(--blue); font-weight: 700; }
+.steps small { display: block; margin-top: 4px; }
+.fold { margin-top: 12px; }
+.fold summary { cursor: pointer; color: var(--blue-text, var(--blue)); font-weight: 600; }
+.note { margin: 12px 0 0; padding: 10px 14px; border-radius: var(--r-btn); font-size: 14px; }
+.note--warn { background: var(--orange-50); color: var(--orange-text); }

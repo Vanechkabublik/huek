@@ -8,11 +8,12 @@ namespace App;
  *
  *  1. start()          — формирует ссылку авторизации и запоминает state/code_verifier в сессии;
  *  2. VK возвращает пользователя на /vk-callback.php?code=…&state=…&device_id=…;
- *  3. handleCallback() — проверяет state, меняет code на токен (POST id.vk.com/oauth2/auth),
- *                        запрашивает профиль (POST id.vk.com/oauth2/user_info), находит/создаёт пользователя.
+ *  3. handleCallback() — проверяет state, меняет code на токен (POST id.vk.ru/oauth2/auth),
+ *                        запрашивает профиль (POST id.vk.ru/oauth2/user_info), находит/создаёт пользователя.
  *
  * Настройки (переменные окружения): VK_CLIENT_ID (ID приложения), APP_URL (https://ваш-домен).
- * VK_ID_BASE нужен только для тестов с заглушкой (по умолчанию https://id.vk.com).
+ * Необязательно: VK_SCOPE (по умолчанию vkid.personal_info; «vkid.personal_info email» — ещё и email),
+ * VK_ID_BASE — адрес VK ID (по умолчанию https://id.vk.ru; в тестах — заглушка).
  */
 final class VkAuth
 {
@@ -25,7 +26,7 @@ final class VkAuth
 
     private static function base(): string
     {
-        return rtrim((string) (getenv('VK_ID_BASE') ?: 'https://id.vk.com'), '/');
+        return rtrim((string) (getenv('VK_ID_BASE') ?: 'https://id.vk.ru'), '/');
     }
 
     /** Публичный адрес сайта без слэша на конце: APP_URL или собирается из запроса (с учётом прокси). */
@@ -76,7 +77,7 @@ final class VkAuth
             'state'                 => $state,
             'code_challenge'        => self::b64url(hash('sha256', $verifier, true)),
             'code_challenge_method' => 'S256',
-            'scope'                 => 'email',
+            'scope'                 => getenv('VK_SCOPE') ?: 'vkid.personal_info',
         ], '', '&', PHP_QUERY_RFC3986);
     }
 
@@ -90,6 +91,14 @@ final class VkAuth
     {
         $ctx = $_SESSION['vk'] ?? null;
         unset($_SESSION['vk']);                                   // одноразово
+
+        // По документации VK параметры возврата могут прийти одним JSON в ?payload=… — разворачиваем и этот вариант
+        if (isset($query['payload']) && is_string($query['payload'])) {
+            $payload = json_decode($query['payload'], true);
+            if (is_array($payload)) {
+                $query = $payload + $query;
+            }
+        }
 
         if (!empty($query['error'])) {
             throw new HttpException('Вход через VK отменён', 400);

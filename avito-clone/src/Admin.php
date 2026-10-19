@@ -39,6 +39,53 @@ final class Admin
     }
 
     /**
+     * Состояние интеграций для раздела «Интеграции»: вход через VK, WebSocket чата, окружение.
+     * Секреты (APP_SECRET, ключи VK) не отдаются — только факт, что они заданы.
+     * @return array<string,mixed>
+     */
+    public static function integrations(): array
+    {
+        $appUrl   = VkAuth::appUrl();
+        $clientId = (string) getenv('VK_CLIENT_ID');
+
+        // Живость WS-сервера: из контейнера app он виден как ws:8081, при запуске без Docker — 127.0.0.1
+        $port = Realtime::publicPort();
+        $candidates = array_values(array_filter([(string) getenv('WS_HEALTH_URL'), "http://ws:$port/health", "http://127.0.0.1:$port/health"]));
+        $wsOk = false;
+        foreach ($candidates as $url) {
+            $body = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 1, 'ignore_errors' => true]]));
+            if ($body === 'ok') {
+                $wsOk = true;
+                break;
+            }
+        }
+
+        return [
+            'vk' => [
+                'enabled'      => VkAuth::enabled(),
+                'client_id'    => $clientId,
+                'redirect_uri' => VkAuth::redirectUri(),
+                'base_domain'  => (string) parse_url($appUrl, PHP_URL_HOST),
+                'https'        => str_starts_with($appUrl, 'https://'),
+                'scope'        => (string) (getenv('VK_SCOPE') ?: 'vkid.personal_info'),
+                'users'        => (int) Database::value('SELECT COUNT(*) FROM users WHERE vk_id IS NOT NULL'),
+            ],
+            'ws' => [
+                'ok'         => $wsOk,
+                'public_url' => Realtime::publicUrl() ?: 'автоматически (/ws на этом домене или порт ' . $port . ')',
+            ],
+            'app' => [
+                'url'        => $appUrl,
+                'php'        => PHP_VERSION,
+                'db'         => (string) Database::value('SHOW server_version'),
+                'secret_set' => (string) getenv('APP_SECRET') !== '',
+                'demo'       => getenv('APP_DEMO') === '1',
+                'debug'      => APP_DEBUG,
+            ],
+        ];
+    }
+
+    /**
      * Данные для главной страницы админки: итоги, динамика за 14 дней, топ категорий, очередь модерации.
      * @return array<string,mixed>
      */

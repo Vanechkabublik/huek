@@ -20,6 +20,10 @@
 		-Server
 	}
 
+	# WebSocket чата (Upgrade-заголовки Caddy обрабатывает сам)
+	@ws path /ws /ws/*
+	reverse_proxy @ws ws:8081
+
 	# Caddy сам добавляет X-Forwarded-For / X-Forwarded-Proto
 	reverse_proxy app:80
 }
