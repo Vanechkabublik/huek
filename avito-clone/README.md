@@ -8,7 +8,7 @@
 
 ```bash
 cd avito-clone
-docker compose up -d --build        # первый запуск ~1–2 минуты: сборка PHP-образа и инициализация PostgreSQL
+docker compose up -d --build        # первый запуск: скачивание образов (Alpine+PHP ~30 МБ, postgres:16) и инициализация БД
 ```
 
 Откройте **http://localhost:8080**.
@@ -33,7 +33,12 @@ cp .env.example .env                # поменять порты/пароли (
 ```
 
 > Папка `public/uploads` (фото) монтируется с хоста вместе с проектом, поэтому фото переживают пересборку контейнера.
-> При старте контейнер выставляет на неё владельца `www-data`.
+>
+> **Образ PHP.** По умолчанию — Alpine + PHP 8.3 из пакетов и встроенный сервер `php -S` (8 процессов, `docker/php/router.php`):
+> образ скачивается за секунды даже на медленном канале. Он рассчитан на демо и разработку. Для боевого режима
+> переключитесь на Apache: в `docker-compose.yml` замените `dockerfile:` на `docker/php/apache/Dockerfile` (образ `php:8.2-apache`, ~500 МБ).
+>
+> **Медленный Docker Hub.** Docker Desktop → Settings → Docker Engine → добавьте `"registry-mirrors": ["https://mirror.gcr.io"]`.
 > Файлы `seed_*.svg` в ней — демо-картинки для тестовых объявлений, не удаляйте их.
 
 ## Что умеет приложение
@@ -68,10 +73,11 @@ cp .env.example .env                # поменять порты/пароли (
 
 ```
 avito-clone/
-├── docker-compose.yml            # app (php:8.2-apache) + db (postgres:16) + adminer (профиль tools)
+├── docker-compose.yml            # app (Alpine + PHP 8.3, встроенный сервер) + db (postgres:16) + adminer (профиль tools)
 ├── .env.example  .dockerignore  .gitignore
 ├── docker/
-│   ├── php/  Dockerfile  apache-vhost.conf  php.ini  entrypoint.sh
+│   ├── php/  Dockerfile  entrypoint.sh  router.php  php.ini      # лёгкий образ на Alpine
+│   │   └── apache/  Dockerfile  vhost.conf  entrypoint.sh      # запасной вариант на php:8.2-apache
 │   └── init/ 01-schema.sql  02-seed.sql        # выполняются PostgreSQL при первом старте
 ├── src/                          # классы приложения (namespace App\, автозагрузка из bootstrap.php)
 │   ├── bootstrap.php             # константы, автозагрузка, часовой пояс, сессия, e()
@@ -117,7 +123,8 @@ avito-clone/
   выбирает сервер; файл перекодируется через GD (вычищает EXIF и «приклеенный» код), имя — случайное. К объявлению можно привязать
   только фото, загруженное в текущей сессии. В `uploads/` Apache не исполняет PHP.
 - **XSS**: серверные шаблоны — `htmlspecialchars` (`e()`), клиентский JS строит DOM через `createElement`/`textContent`, `innerHTML` не используется.
-- DocumentRoot — `public/`: `src/`, `templates/`, `docker/` и `.env` недоступны по HTTP.
+- DocumentRoot — `public/`: `src/`, `templates/`, `docker/` и `.env` недоступны по HTTP. `docker/php/router.php` (встроенный сервер)
+  и `docker/php/apache/vhost.conf` (Apache) закрывают скрытые файлы и запрещают исполнять PHP в `uploads/`.
 
 ## Дизайн-система (`public/assets/css/style.css`)
 

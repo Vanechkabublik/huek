@@ -3,7 +3,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: docker/php/Dockerfile
+      dockerfile: docker/php/Dockerfile      # лёгкий образ на Alpine; запасной вариант — docker/php/apache/Dockerfile
     container_name: board-app
     ports:
       - "${APP_PORT:-8080}:80"
