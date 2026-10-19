@@ -38,7 +38,7 @@ final class Admin
         $params = [];
         $emailQuery = trim($emailQuery);
         if ($emailQuery !== '') {
-            $where = "u.email LIKE ? ESCAPE '\\\\'";
+            $where = "u.email ILIKE ?";
             $params[] = '%' . addcslashes(mb_strtolower($emailQuery), '%_\\') . '%';
         }
 
@@ -128,7 +128,7 @@ final class Admin
         }
         $q = trim($q);
         if ($q !== '') {
-            $where[] = "(a.title LIKE ? ESCAPE '\\\\' OR u.email LIKE ? ESCAPE '\\\\')";
+            $where[] = "(a.title ILIKE ? OR u.email ILIKE ?)";
             $like = '%' . addcslashes($q, '%_\\') . '%';
             array_push($params, $like, $like);
         }
@@ -184,6 +184,6 @@ final class Admin
             throw new HttpException('Причина слишком длинная', 422, ['reason' => 'Максимум 1000 символов']);
         }
 
-        Database::run('UPDATE ads SET status = ?, rejection_reason = ? WHERE id = ?', [$status, $reason, $adId]);
+        Database::run('UPDATE ads SET status = ?, rejection_reason = ?, updated_at = NOW() WHERE id = ?', [$status, $reason, $adId]);
     }
 }

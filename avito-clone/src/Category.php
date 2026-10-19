@@ -17,7 +17,7 @@ final class Category
         $rows = Database::all(
             "SELECT c.id, c.name, c.icon,
                     COUNT(a.id) AS total_ads,
-                    COALESCE(SUM(a.status = 'approved'), 0) AS approved_ads
+                    COUNT(a.id) FILTER (WHERE a.status = 'approved') AS approved_ads
              FROM categories c
              LEFT JOIN ads a ON a.category_id = c.id
              GROUP BY c.id, c.name, c.icon
@@ -41,8 +41,7 @@ final class Category
     {
         [$name, $icon] = self::validate($name, $icon);
         self::assertUnique($name, null);
-        Database::run('INSERT INTO categories (name, icon) VALUES (?, ?)', [$name, $icon]);
-        return (int) Database::pdo()->lastInsertId();
+        return Database::insert('INSERT INTO categories (name, icon) VALUES (?, ?)', [$name, $icon]);
     }
 
     public static function update(int $id, string $name, string $icon): void

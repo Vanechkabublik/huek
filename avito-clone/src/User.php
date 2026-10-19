@@ -37,7 +37,7 @@ final class User
         if (self::emailExists($data['email'])) {
             throw new HttpException('Проверьте правильность заполнения полей', 422, ['email' => 'Этот email уже зарегистрирован']);
         }
-        Database::run(
+        return Database::insert(
             'INSERT INTO users (email, password_hash, name, phone, role) VALUES (?, ?, ?, ?, ?)',
             [
                 mb_strtolower(trim($data['email'])),
@@ -47,7 +47,6 @@ final class User
                 'user',
             ]
         );
-        return (int) Database::pdo()->lastInsertId();
     }
 
     public static function setPassword(int $id, string $password): void

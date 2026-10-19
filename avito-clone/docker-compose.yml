@@ -23,35 +23,36 @@ services:
         condition: service_healthy
 
   db:
-    image: mysql:8.0
+    image: postgres:16
     container_name: board-db
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS:-root}
-      MYSQL_DATABASE: ${DB_NAME:-ads}
-      MYSQL_USER: ${DB_USER:-ads_user}
-      MYSQL_PASSWORD: ${DB_PASS:-ads_pass}
+      POSTGRES_DB: ${DB_NAME:-ads}
+      POSTGRES_USER: ${DB_USER:-ads_user}
+      POSTGRES_PASSWORD: ${DB_PASS:-ads_pass}
+      TZ: ${APP_TIMEZONE:-Europe/Moscow}
     volumes:
-      - db_data:/var/lib/mysql
-      # *.sql из этой папки выполняются один раз — при первом создании тома db_data
+      - pg_data:/var/lib/postgresql/data
+      # *.sql из этой папки выполняются один раз — при первом создании тома pg_data
       - ./docker/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      # -h 127.0.0.1: во время инициализации Postgres слушает только unix-сокет,
+      # поэтому проверка по TCP проходит лишь когда init-скрипты уже выполнены
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 30
-      start_period: 20s
+      start_period: 10s
 
-  phpmyadmin:
-    image: phpmyadmin:5
-    container_name: board-pma
+  adminer:
+    image: adminer:4
+    container_name: board-adminer
     profiles: ["tools"]          # docker compose --profile tools up -d
     ports:
-      - "${PMA_PORT:-8081}:80"
+      - "${ADMINER_PORT:-8081}:8080"
     environment:
-      PMA_HOST: db
+      ADMINER_DEFAULT_SERVER: db
     depends_on:
       - db
 
 volumes:
-  db_data:
+  pg_data:

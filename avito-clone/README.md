@@ -1,6 +1,6 @@
 # Авито-клон — доска объявлений на PHP + Docker
 
-Монолитное веб-приложение: чистый **PHP 8.2 (ООП) + PDO/MySQL 8**, нативные HTML/CSS/JS (AJAX через `fetch`).
+Монолитное веб-приложение: чистый **PHP 8.2 (ООП) + PDO/PostgreSQL 16**, нативные HTML/CSS/JS (AJAX через `fetch`).
 Без фреймворков и Composer-пакетов. Дизайн — в духе современного Авито: синий + жёлтый акценты, шрифт Inter,
 карточки с тенями и hover-анимациями, адаптив от 360 px до широких мониторов.
 
@@ -8,7 +8,7 @@
 
 ```bash
 cd avito-clone
-docker compose up -d --build        # первый запуск ~1–2 минуты: сборка PHP-образа и инициализация MySQL
+docker compose up -d --build        # первый запуск ~1–2 минуты: сборка PHP-образа и инициализация PostgreSQL
 ```
 
 Откройте **http://localhost:8080**.
@@ -19,7 +19,7 @@ docker compose up -d --build        # первый запуск ~1–2 мину�
 | Админ-панель        | http://localhost:8080/admin.php — `admin@example.com` / `admin123`         |
 | Пользователь 1      | `ivan@example.com` / `user123` (Иван Петров, Москва)                        |
 | Пользователь 2      | `maria@example.com` / `user123` (Мария Соколова, Санкт-Петербург)           |
-| phpMyAdmin (опц.)   | `docker compose --profile tools up -d` → http://localhost:8081 (`root`/`root`) |
+| Adminer (опц.)      | `docker compose --profile tools up -d` → http://localhost:8081 (система `PostgreSQL`, сервер `db`, пользователь/пароль/БД: `ads_user` / `ads_pass` / `ads`) |
 
 На странице входа есть кнопки быстрого входа «Админ / Иван / Мария».
 
@@ -27,8 +27,8 @@ docker compose up -d --build        # первый запуск ~1–2 мину�
 
 ```bash
 docker compose logs -f app          # логи Apache/PHP
-docker compose down                 # остановить (данные БД сохраняются в томе db_data)
-docker compose down -v              # остановить и стереть БД — при следующем старте заново выполнятся docker/init/*.sql
+docker compose down                 # остановить (данные БД сохраняются в томе pg_data)
+docker compose down -v              # остановить и стереть БД — при следующем старте заново выполнятся docker/init/*.sql (нужно после правок схемы/сида)
 cp .env.example .env                # поменять порты/пароли (все переменные имеют значения по умолчанию)
 ```
 
@@ -68,11 +68,11 @@ cp .env.example .env                # поменять порты/пароли (
 
 ```
 avito-clone/
-├── docker-compose.yml            # app (php:8.2-apache) + db (mysql:8.0) + phpmyadmin (профиль tools)
+├── docker-compose.yml            # app (php:8.2-apache) + db (postgres:16) + adminer (профиль tools)
 ├── .env.example  .dockerignore  .gitignore
 ├── docker/
 │   ├── php/  Dockerfile  apache-vhost.conf  php.ini  entrypoint.sh
-│   └── init/ 01-schema.sql  02-seed.sql        # выполняются MySQL при первом старте
+│   └── init/ 01-schema.sql  02-seed.sql        # выполняются PostgreSQL при первом старте
 ├── src/                          # классы приложения (namespace App\, автозагрузка из bootstrap.php)
 │   ├── bootstrap.php             # константы, автозагрузка, часовой пояс, сессия, e()
 │   ├── Database.php              # PDO-синглтон, prepared statements, повторные попытки подключения
@@ -107,7 +107,7 @@ avito-clone/
 
 ## Безопасность
 
-- **SQL**: только PDO prepared statements (`ATTR_EMULATE_PREPARES = false`), `LIKE` экранируется, `ORDER BY` — по белому списку.
+- **SQL**: только PDO prepared statements (`ATTR_EMULATE_PREPARES = false`), `LIKE`/`ILIKE` экранируется, `ORDER BY` — по белому списку.
 - **Пароли**: `password_hash` / `password_verify`, автоматический rehash; время ответа при неверном email выровнено.
 - **Сессии**: `HttpOnly`, `SameSite=Lax`, `use_strict_mode`, `session_regenerate_id` при входе. Пользователь перечитывается из БД
   на каждый запрос — блокировка действует мгновенно.
@@ -144,17 +144,17 @@ avito-clone/
 
 ## Запуск без Docker (для разработки)
 
-Нужны PHP ≥ 8.2 с `pdo_mysql`, `gd`, `mbstring`, `fileinfo`, `exif` и MySQL 8 / MariaDB 10.6+.
+Нужны PHP ≥ 8.2 с `pdo_pgsql`, `gd`, `mbstring`, `fileinfo`, `exif` и PostgreSQL 12+ (локаль БД с поддержкой кириллицы, например `en_US.UTF-8`, — иначе регистронезависимый поиск `ILIKE` не будет учитывать регистр русских букв).
 
 ```bash
-mysql -uroot -e "CREATE DATABASE ads CHARACTER SET utf8mb4; CREATE USER 'ads_user'@'%' IDENTIFIED BY 'ads_pass'; GRANT ALL ON ads.* TO 'ads_user'@'%';"
-mysql -uroot ads < docker/init/01-schema.sql && mysql -uroot ads < docker/init/02-seed.sql
+psql -U postgres -c "CREATE USER ads_user WITH PASSWORD 'ads_pass'" -c "CREATE DATABASE ads OWNER ads_user"
+PGPASSWORD=ads_pass psql -h 127.0.0.1 -U ads_user -d ads -f docker/init/01-schema.sql -f docker/init/02-seed.sql
 DB_HOST=127.0.0.1 APP_DEBUG=1 php -S 127.0.0.1:8080 -t public
 ```
 
 ## Что проверено
 
-Код прогнан вручную в браузере (Chromium/Playwright) на MariaDB 10.11 и PHP 8.3: поиск и фильтры, «Показать ещё», галерея,
+Код прогнан вручную в браузере (Chromium/Playwright) на PostgreSQL 16 и PHP 8.3: поиск и фильтры, «Показать ещё», галерея,
 регистрация, загрузка и удаление фото, создание/редактирование объявления, модерация с причиной, блокировка пользователя
 (сессия умирает сразу, объявления скрываются), смена пароля, CRUD категорий, права доступа, CSRF, попытки загрузить не-изображение,
 подмену чужого файла и XSS в заголовке. Сборка Docker-образов в среде разработки не запускалась — `docker compose config` проходит,
@@ -165,5 +165,5 @@ DB_HOST=127.0.0.1 APP_DEBUG=1 php -S 127.0.0.1:8080 -t public
 - Нет защиты от перебора паролей (rate limiting) и капчи при показе телефона.
 - Фото, загруженные, но так и не привязанные к объявлению (вкладку закрыли), остаются на диске — нужен cron-скрипт очистки.
 - Нет восстановления пароля по email и подтверждения email (письма не отправляются).
-- Поиск — `LIKE`; для больших объёмов стоит добавить `FULLTEXT`-индекс.
+- Поиск — `ILIKE`; для больших объёмов стоит добавить полнотекстовый индекс (`tsvector` + GIN).
 - Нет избранного и истории диалогов «цепочкой»: сообщения показаны плоским списком.

@@ -48,8 +48,8 @@ final class Ad
         $q = trim((string) ($f['q'] ?? ''));
         if ($q !== '') {
             foreach (array_slice(preg_split('/\s+/u', $q) ?: [], 0, 6) as $word) {
-                $like = '%' . addcslashes($word, '%_\\') . '%';
-                $where[] = "(a.title LIKE ? ESCAPE '\\\\' OR a.description LIKE ? ESCAPE '\\\\')";
+                $like = '%' . addcslashes($word, '%_\\') . '%';  // в PostgreSQL escape-символ LIKE по умолчанию — обратный слэш
+                $where[] = "(a.title ILIKE ? OR a.description ILIKE ?)";
                 array_push($params, $like, $like);
             }
         }
@@ -200,8 +200,7 @@ final class Ad
             return false;
         }
         $_SESSION['viewed'][$id] = true;
-        // updated_at = updated_at — чтобы счётчик не менял «дату обновления»
-        Database::run('UPDATE ads SET views = views + 1, updated_at = updated_at WHERE id = ?', [$id]);
+        Database::run('UPDATE ads SET views = views + 1 WHERE id = ?', [$id]);
         return true;
     }
 
@@ -254,12 +253,11 @@ final class Ad
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
-            Database::run(
+            $adId = Database::insert(
                 "INSERT INTO ads (user_id, category_id, title, description, price, city, status)
                  VALUES (?, ?, ?, ?, ?, ?, 'pending')",
                 [$userId, $data['category_id'], $data['title'], $data['description'], $data['price'], $data['city']]
             );
-            $adId = (int) $pdo->lastInsertId();
             foreach ($data['images'] as $filename) {
                 Database::run('INSERT INTO ad_images (ad_id, filename) VALUES (?, ?)', [$adId, $filename]);
             }
@@ -294,7 +292,7 @@ final class Ad
         try {
             Database::run(
                 "UPDATE ads SET category_id = ?, title = ?, description = ?, price = ?, city = ?,
-                                status = 'pending', rejection_reason = NULL
+                                status = 'pending', rejection_reason = NULL, updated_at = NOW()
                  WHERE id = ?",
                 [$data['category_id'], $data['title'], $data['description'], $data['price'], $data['city'], $id]
             );

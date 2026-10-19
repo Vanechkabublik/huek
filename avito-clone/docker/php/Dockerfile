@@ -1,11 +1,11 @@
 FROM php:8.2-apache
 
 # gd — ресайз/перекодирование загруженных фото, exif — поворот по EXIF-ориентации,
-# pdo_mysql — доступ к MySQL.
+# pdo_pgsql — доступ к PostgreSQL.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpng-dev libjpeg62-turbo-dev libwebp-dev libfreetype6-dev \
+    && apt-get install -y --no-install-recommends libpng-dev libjpeg62-turbo-dev libwebp-dev libfreetype6-dev libpq-dev \
     && docker-php-ext-configure gd --with-jpeg --with-webp --with-freetype \
-    && docker-php-ext-install -j"$(nproc)" gd pdo_mysql exif \
+    && docker-php-ext-install -j"$(nproc)" gd pdo_pgsql exif \
     && a2enmod rewrite headers expires \
     && rm -rf /var/lib/apt/lists/*
 

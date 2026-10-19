@@ -6,7 +6,7 @@ use App\View;
     <div class="container footer__inner">
         <div>
             <a class="logo logo--sm" href="/index.php"><span class="logo__mark">А<i></i></span><span class="logo__text">Авито<b>-клон</b></span></a>
-            <p class="footer__note">Учебный проект: монолит на PHP + MySQL, без фреймворков.</p>
+            <p class="footer__note">Учебный проект: монолит на PHP + PostgreSQL, без фреймворков.</p>
         </div>
         <nav class="footer__links" aria-label="Ссылки">
             <a href="/index.php">Объявления</a>
