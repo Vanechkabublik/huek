@@ -1,0 +1,64 @@
+# Боевой запуск за HTTPS (Caddy + автоматический сертификат Let's Encrypt):
+#   cp .env.prod.example .env   # заполните DOMAIN, ACME_EMAIL, DB_PASS
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Наружу открыты только порты 80 и 443 (Caddy). Приложение и БД снаружи недоступны.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"             # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?Укажите DOMAIN в .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Укажите ACME_EMAIL в .env}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data           # сертификаты — не удаляйте том, иначе Let's Encrypt выдаст их заново (есть лимиты)
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile      # для высокой нагрузки: docker/php/apache/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "80"
+    volumes:
+      - ./:/var/www/html
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-ads}
+      DB_USER: ${DB_USER:-ads_user}
+      DB_PASS: ${DB_PASS:?Укажите DB_PASS в .env}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+      APP_DEBUG: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-ads}
+      POSTGRES_USER: ${DB_USER:-ads_user}
+      POSTGRES_PASSWORD: ${DB_PASS:?Укажите DB_PASS в .env}
+      TZ: ${APP_TIMEZONE:-Europe/Moscow}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  pg_data:
+  caddy_data:
+  caddy_config:

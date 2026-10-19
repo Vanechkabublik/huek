@@ -18,6 +18,7 @@ services:
       DB_PASS: ${DB_PASS:-ads_pass}
       APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
       APP_DEBUG: ${APP_DEBUG:-0}
+      APP_DEMO: ${APP_DEMO:-1}      # 1 — на странице входа кнопки быстрого входа с демо-паролями
     depends_on:
       db:
         condition: service_healthy

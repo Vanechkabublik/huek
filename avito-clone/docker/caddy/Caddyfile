@@ -1,0 +1,25 @@
+# Caddy сам получает и продлевает сертификат Let's Encrypt для {$DOMAIN}
+# и перенаправляет http → https. Переменные берутся из .env через docker-compose.prod.yml.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Фото до 5 МБ + служебные поля формы
+	request_body {
+		max_size 12MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Caddy сам добавляет X-Forwarded-For / X-Forwarded-Proto
+	reverse_proxy app:80
+}

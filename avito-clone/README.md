@@ -21,7 +21,9 @@ docker compose up -d --build        # первый запуск: скачива�
 | Пользователь 2      | `maria@example.com` / `user123` (Мария Соколова, Санкт-Петербург)           |
 | Adminer (опц.)      | `docker compose --profile tools up -d` → http://localhost:8081 (система `PostgreSQL`, сервер `db`, пользователь/пароль/БД: `ads_user` / `ads_pass` / `ads`) |
 
-На странице входа есть кнопки быстрого входа «Админ / Иван / Мария».
+На странице входа есть кнопки быстрого входа «Админ / Иван / Мария» (только в демо-режиме `APP_DEMO=1`).
+
+**Выложить сайт в интернет с HTTPS** (свой поддомен + сервер с Docker) — см. [DEPLOY.md](DEPLOY.md).
 
 Полезные команды:
 
@@ -156,7 +158,7 @@ avito-clone/
 ```bash
 psql -U postgres -c "CREATE USER ads_user WITH PASSWORD 'ads_pass'" -c "CREATE DATABASE ads OWNER ads_user"
 PGPASSWORD=ads_pass psql -h 127.0.0.1 -U ads_user -d ads -f docker/init/01-schema.sql -f docker/init/02-seed.sql
-DB_HOST=127.0.0.1 APP_DEBUG=1 php -S 127.0.0.1:8080 -t public
+DB_HOST=127.0.0.1 APP_DEBUG=1 APP_DEMO=1 php -S 127.0.0.1:8080 -t public docker/php/router.php
 ```
 
 ## Что проверено

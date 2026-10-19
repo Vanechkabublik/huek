@@ -34,4 +34,7 @@ function e(?string $value): string
     return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-\App\Auth::start();
+// В консольных скриптах (bin/*.php) сессия не нужна
+if (PHP_SAPI !== 'cli') {
+    \App\Auth::start();
+}

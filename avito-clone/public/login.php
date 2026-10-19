@@ -33,12 +33,14 @@ View::header(['title' => 'Вход', 'page' => 'login', 'categories' => false, '
         </form>
 
         <p class="auth__switch">Нет аккаунта? <a href="/register.php">Зарегистрироваться</a></p>
+        <?php if (getenv('APP_DEMO') === '1'): /* демо-доступ с паролями показываем только в учебном режиме */ ?>
         <div class="auth__demo">
             <span>Демо-доступ:</span>
             <button type="button" class="chip" data-fill="admin@example.com|admin123">Админ</button>
             <button type="button" class="chip" data-fill="ivan@example.com|user123">Иван</button>
             <button type="button" class="chip" data-fill="maria@example.com|user123">Мария</button>
         </div>
+        <?php endif; ?>
     </div>
 </main>
 <?php View::footer(); ?>
