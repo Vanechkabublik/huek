@@ -105,18 +105,29 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
 | Симптом | Причина / что делать |
 |---|---|
 | Браузер пишет «небезопасно» / нет сертификата | Смотрите `logs caddy`. Чаще всего: DNS ещё не указывает на сервер, закрыты 80/443, домен за «оранжевым облаком» Cloudflare, либо исчерпан лимит Let's Encrypt (5 неудачных попыток в час — подождите). |
-| `address already in use` на 80/443 | Порты заняты nginx/Apache: остановите их (`sudo systemctl stop nginx apache2`) или используйте вариант ниже. |
+| `address already in use` на 80/443 | Порты заняты nginx/Apache — см. раздел «Порты 80/443 заняты» ниже. |
 | Сайт открывается, но вход «сбрасывается» | Проверьте, что заходите по `https://` (cookie помечается `Secure`, когда Caddy передаёт `X-Forwarded-Proto: https`). |
 | Фото не загружаются | Лимит 5 МБ на файл; папка `public/uploads` должна быть доступна на запись (`ls -ld public/uploads`). |
 | Ошибка 500 | `docker compose -f docker-compose.prod.yml logs --tail=100 app`. Для подробностей временно добавьте `APP_DEBUG: "1"` в `docker-compose.prod.yml` (не оставляйте включённым). |
 
-## Уже есть nginx на сервере (вместо Caddy)
+## Порты 80/443 заняты (уже есть nginx/Apache)
 
-1. В `docker-compose.prod.yml` удалите сервис `caddy` (и тома `caddy_*`), а у `app` вместо `expose:` укажите
-   `ports: ["127.0.0.1:8080:80"]` — приложение будет доступно только самому серверу.
-2. Конфиг nginx (`/etc/nginx/sites-available/board`):
+Узнайте, кто занял порт: `sudo ss -ltnp | grep -E ':(80|443)\b'`.
+
+**Вариант А — освободить порты** (если этот nginx не нужен): `sudo systemctl disable --now nginx apache2`, затем
+`docker compose -f docker-compose.prod.yml up -d`.
+
+**Вариант Б — оставить nginx** и пустить сайт через него (Caddy не нужен):
+
+1. Запустите только `app` и `db`; приложение будет слушать лишь `127.0.0.1:8080`:
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d --build app db
+   docker compose -f docker-compose.prod.yml rm -sf caddy      # убрать неудавшийся контейнер Caddy
+   ```
+2. Конфиг nginx (`/etc/nginx/sites-available/board`, затем `sudo ln -s /etc/nginx/sites-available/board /etc/nginx/sites-enabled/`):
    ```nginx
    server {
+       listen 80;
        server_name board.example.com;
        client_max_body_size 12m;
 
@@ -128,7 +139,9 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
        }
    }
    ```
-3. Сертификат: `sudo certbot --nginx -d board.example.com` (certbot сам допишет https и редирект).
+3. Проверить и применить: `sudo nginx -t && sudo systemctl reload nginx`.
+4. Сертификат: `sudo apt install -y certbot python3-certbot-nginx && sudo certbot --nginx -d board.example.com`
+   (certbot сам допишет https и редирект и настроит автопродление).
 
 ## Замечание о производительности
 
