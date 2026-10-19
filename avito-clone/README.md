@@ -93,7 +93,7 @@ avito-clone/
 ├── templates/                    # header.php, footer.php, icons.php (SVG-спрайт иконок)
 └── public/                       # DocumentRoot — наружу смотрит только эта папка
     ├── index.php  ad.php  login.php  register.php  create-ad.php  my-ads.php  messages.php  admin.php
-    ├── api/  auth.php  ads.php  admin.php  upload.php  messages.php      # JSON-эндпоинты
+    ├── api/  auth.php  listings.php  admin.php  upload.php  messages.php      # JSON-эндпоинты
     ├── assets/css/style.css      # дизайн-система (токены, компоненты, адаптив)
     ├── assets/js/app.js          # весь клиентский код (по секциям, с комментариями)
     └── uploads/                  # фото объявлений (+ демо seed_*.svg)
@@ -106,7 +106,7 @@ avito-clone/
 | Эндпоинт           | Действия (`?action=`)                                                                                  |
 |--------------------|--------------------------------------------------------------------------------------------------------|
 | `api/auth.php`     | `login`, `register`, `logout` (POST) · `me` (GET)                                                      |
-| `api/ads.php`      | `list` (q, category, city, price_min, price_max, sort, user, page) · `meta` · `mine` — GET; `phone`, `create`, `update`, `delete` — POST |
+| `api/listings.php` | `list` (q, category, city, price_min, price_max, sort, user, page) · `meta` · `mine` — GET; `phone`, `create`, `update`, `delete` — POST |
 | `api/upload.php`   | `upload` (multipart `file`), `delete` (убрать превью до сохранения) — POST                              |
 | `api/messages.php` | `send` (POST) · `inbox` (GET, `box=in\|sent`)                                                          |
 | `api/admin.php`    | GET: `stats`, `users`, `ads`, `categories` · POST: `user_block`, `user_unblock`, `user_password`, `user_delete`, `ad_moderate`, `category_create`, `category_update`, `category_delete` |

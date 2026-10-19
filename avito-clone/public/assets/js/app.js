@@ -447,7 +447,7 @@
             }
 
             try {
-                const data = await apiGet('ads', { action: 'list', ...params, page: state.page });
+                const data = await apiGet('listings', { action: 'list', ...params, page: state.page });
                 if (token !== state.token) return;          // пришёл устаревший ответ
 
                 if (!append) grid.replaceChildren();
@@ -540,7 +540,7 @@
                     return;
                 }
                 await withLoading(phoneBtn, async () => {
-                    const res = await apiPost('ads', 'phone', { id: adId });
+                    const res = await apiPost('listings', 'phone', { id: adId });
                     if (!res.phone) {
                         toast('Продавец не указал телефон — напишите ему сообщение', 'warning', 3500);
                         return;
@@ -585,7 +585,7 @@
             delBtn.addEventListener('click', async () => {
                 if (!(await confirmDialog('Объявление и все его фото будут удалены без возможности восстановления.', { title: 'Удалить объявление?', confirmText: 'Удалить' }))) return;
                 await withLoading(delBtn, async () => {
-                    await apiPost('ads', 'delete', { id: adId });
+                    await apiPost('listings', 'delete', { id: adId });
                     toast('Объявление удалено');
                     setTimeout(() => (location.href = '/my-ads.php'), 600);
                 });
@@ -595,7 +595,7 @@
         // --- похожие объявления
         const related = $('#related');
         if (related) {
-            apiGet('ads', { action: 'list', category: root.dataset.category !== '0' ? root.dataset.category : '', exclude: adId })
+            apiGet('listings', { action: 'list', category: root.dataset.category !== '0' ? root.dataset.category : '', exclude: adId })
                 .then((data) => {
                     const items = data.items.slice(0, 4);
                     if (!items.length) return;
@@ -886,7 +886,7 @@
 
             setLoading(submitBtn, true);
             try {
-                const res = await apiPost('ads', isEdit ? 'update' : 'create', data);
+                const res = await apiPost('listings', isEdit ? 'update' : 'create', data);
                 showSuccess(res);
             } catch (err) {
                 setLoading(submitBtn, false);
@@ -924,7 +924,7 @@
             const my = ++token;
             grid.replaceChildren(...skeletonCards(4));
             try {
-                const data = await apiGet('ads', { action: 'mine', status });
+                const data = await apiGet('listings', { action: 'mine', status });
                 if (my !== token) return;
                 tabs.forEach((t) => {
                     const key = t.dataset.status || 'all';
@@ -952,7 +952,7 @@
         async function removeAd(ad) {
             if (!(await confirmDialog(`«${ad.title}» и все его фото будут удалены без возможности восстановления.`, { title: 'Удалить объявление?', confirmText: 'Удалить' }))) return;
             try {
-                await apiPost('ads', 'delete', { id: ad.id });
+                await apiPost('listings', 'delete', { id: ad.id });
                 toast('Объявление удалено');
                 load();
             } catch (err) {

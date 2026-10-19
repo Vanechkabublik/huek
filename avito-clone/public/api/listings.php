@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Эндпоинт объявлений.
+ * Эндпоинт объявлений (файл назван listings.php, а не ads.php: блокировщики рекламы режут URL со словом «ads»).
  *   GET  ?action=list    q, category, city, price_min, price_max, sort, user, exclude, page   — публичная выдача
  *   GET  ?action=meta                                                                       — категории и города для фильтров
  *   GET  ?action=mine    status                                                             — мои объявления (нужен вход)
