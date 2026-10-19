@@ -11,6 +11,7 @@
     } = window.Board;
 
     const STATUS_TABS = [['', 'Все'], ['pending', 'На модерации'], ['approved', 'Одобрены'], ['rejected', 'Отклонены'], ['blocked', 'Заблокированы']];
+    const PROVIDER_NAMES = { google: 'Google', yandex: 'Яндекс', vk: 'VK' };
     const STATUS_LABELS = { approved: 'Одобрено', rejected: 'Отклонено', blocked: 'Заблокировано', pending: 'На модерации' };
 
     function initAdmin() {
@@ -127,7 +128,7 @@
             const state = { q: '', filter: params.get('filter') || 'all', page: 1, items: [], total: 0, hasMore: false, token: 0 };
             const search = el('input', { class: 'input', type: 'search', placeholder: 'Поиск по email, имени, телефону или #id…', autocomplete: 'off', 'aria-label': 'Поиск пользователей' });
             const filterSel = el('select', { class: 'select', 'aria-label': 'Фильтр' },
-                ...[['all', 'Все пользователи'], ['active', 'Активные'], ['blocked', 'Заблокированные'], ['admin', 'Администраторы'], ['vk', 'Вошли через VK']].map(([v, t]) => el('option', { value: v }, t)));
+                ...[['all', 'Все пользователи'], ['active', 'Активные'], ['blocked', 'Заблокированные'], ['admin', 'Администраторы'], ['social', 'Вошли через Яндекс/Google']].map(([v, t]) => el('option', { value: v }, t)));
             filterSel.value = state.filter;
             const { wrap, tbody } = tableShell(['Пользователь', 'Телефон', 'Регистрация', 'Последний вход', 'Статус', 'Объявл.', 'Действия'], 'table--users');
             const foot = el('div', { class: 'table-foot' });
@@ -160,8 +161,8 @@
                 }
                 return el('tr', {},
                     el('td', { 'data-label': 'Пользователь' }, el('div', { class: 'cell-user' }, avatarCell(u),
-                        el('div', { class: 'cell-stack' }, el('span', { class: 'cell-title' }, u.name), el('span', { class: 'cell-sub' }, u.email || '— (вход через VK)'),
-                            isAdmin ? pill('admin', 'Администратор') : null, u.has_vk ? pill('admin', 'VK') : null))),
+                        el('div', { class: 'cell-stack' }, el('span', { class: 'cell-title' }, u.name), el('span', { class: 'cell-sub' }, u.email || '— (вход через соцсеть)'),
+                            isAdmin ? pill('admin', 'Администратор') : null, ...u.social.map((c) => pill('admin', PROVIDER_NAMES[c] || c))))),
                     el('td', { class: 'nowrap', 'data-label': 'Телефон' }, u.phone || '—'),
                     el('td', { class: 'nowrap', 'data-label': 'Регистрация' }, u.created_at),
                     el('td', { class: 'nowrap', 'data-label': 'Последний вход' }, u.last_login),
@@ -239,13 +240,13 @@
                     : [el('div', { class: 'mini-empty' }, 'Объявлений нет')]));
                 const body = el('div', {},
                     el('div', { class: 'detail-head' }, avatarCell({ name: u.name, avatar: u.avatar }),
-                        el('div', {}, el('h3', {}, u.name), el('div', { class: 'cell-sub' }, u.email || 'Вход через VK, email не указан')),
+                        el('div', {}, el('h3', {}, u.name), el('div', { class: 'cell-sub' }, u.email || 'Вход через соцсеть, email не указан')),
                         isAdmin ? pill('admin', 'Администратор') : null, u.is_blocked ? pill('blocked', 'Заблокирован') : null),
                     el('div', { class: 'detail-grid' },
                         el('div', {},
                             el('dl', { class: 'kv' }, el('dt', {}, 'ID'), el('dd', {}, `#${u.id}`), el('dt', {}, 'Телефон'), el('dd', {}, u.phone || '—'),
                                 el('dt', {}, 'Регистрация'), el('dd', {}, u.created_at), el('dt', {}, 'Последний вход'), el('dd', {}, u.last_login),
-                                el('dt', {}, 'VK'), el('dd', {}, u.vk_id ? `привязан (id ${u.vk_id})` : 'нет'), el('dt', {}, 'О себе'), el('dd', {}, u.about || '—')),
+                                el('dt', {}, 'Соцсети'), el('dd', {}, u.social.length ? u.social.map((i) => i.name + (i.email ? ` (${i.email})` : '')).join(', ') : 'нет'), el('dt', {}, 'О себе'), el('dd', {}, u.about || '—')),
                             el('div', { class: 'detail-section-title' }, 'Активность'),
                             el('div', { class: 'stat-row' },
                                 el('span', {}, 'Объявлений: ', el('b', {}, String(d.ads.all))), el('span', {}, 'на модерации: ', el('b', {}, String(d.ads.pending))),
@@ -753,32 +754,50 @@
 
         async function viewIntegrations() {
             const d = await adminApi('integrations');
-            const vk = d.vk;
+            const oa = d.oauth;
             const yesNo = (ok, yes, no) => pill(ok ? 'active' : 'pending', ok ? yes : no);
+            const setupCmd = 'cd ~/huek/avito-clone && bash bin/setup-oauth.sh';
+            const setupStep = el('li', {}, 'На сервере запустите скрипт — он спросит ключи (ввод скрыт, в историю команд они не попадут) и перезапустит сайт:',
+                copyBox(setupCmd, { block: true }));
 
-            const vkSteps = el('ol', { class: 'steps' },
-                el('li', {}, 'Откройте ', el('a', { href: 'https://id.vk.ru/about/business/go', target: '_blank', rel: 'noopener' }, 'кабинет VK ID для бизнеса'),
-                    ' и войдите своим аккаунтом VK (если попросят — создайте профиль бизнеса, это бесплатно).'),
-                el('li', {}, 'Раздел «Мои приложения» → «Добавить приложение». Платформа — ', el('b', {}, 'Web'), '.'),
-                el('li', {}, 'Поле «Базовый домен»: ', copyBox(vk.base_domain)),
-                el('li', {}, 'Поле «Доверенный Redirect URL»: ', copyBox(vk.redirect_uri), el('small', { class: 'muted' }, 'Ровно так — с https и путём, без лишних символов.')),
-                el('li', {}, 'Создайте приложение. В карточке: «Приложение» → «Информация о приложении» → ', el('b', {}, 'ID приложения'), ' (это число).'),
-                el('li', {}, 'На сервере выполните (подставьте свой ID):', copyBox('cd ~/huek/avito-clone && VK_CLIENT_ID=ВАШ_ID bash bin/server-update.sh', { block: true }),
-                    el('small', { class: 'muted' }, 'Защищённый и сервисный ключи VK сайту не нужны — никому их не показывайте.')));
+            const guides = {
+                yandex: () => [
+                    el('li', {}, 'Откройте ', el('a', { href: 'https://oauth.yandex.ru/', target: '_blank', rel: 'noopener' }, 'oauth.yandex.ru'),
+                        ' под своим аккаунтом Яндекса → «Создать приложение» → «Для авторизации пользователей». Укажите название сервиса, иконку и контактную почту.'),
+                    el('li', {}, 'Платформы: отметьте «Веб-сервисы» и в поле Redirect URI вставьте:', copyBox(oa.redirect_uri)),
+                    el('li', {}, 'Доступ к данным: «логин, имя и фамилия», «адрес электронной почты», «портрет пользователя». Нажмите «Продолжить» → «Всё верно».'),
+                    el('li', {}, 'На странице приложения скопируйте ', el('b', {}, 'ClientID'), ' (пароль — «Client secret» — для входа не обязателен, но можно ввести и его).'),
+                    setupStep,
+                ],
+                google: () => [
+                    el('li', {}, 'Откройте ', el('a', { href: 'https://console.cloud.google.com/auth/overview', target: '_blank', rel: 'noopener' }, 'Google Cloud Console → Google Auth Platform'),
+                        ', создайте проект (если нет) и пройдите настройку: название приложения, почта поддержки, аудитория «Внешняя (External)».'),
+                    el('li', {}, 'Раздел «Клиенты (Clients)» → «Создать клиент», тип приложения — ', el('b', {}, 'Веб-приложение (Web application)'), '. В «Авторизованные URI перенаправления» добавьте:', copyBox(oa.redirect_uri)),
+                    el('li', {}, 'После создания скопируйте ', el('b', {}, 'Client ID'), ' и ', el('b', {}, 'Client secret'), ' (секрет показывается сразу — сохраните его).'),
+                    el('li', {}, 'Раздел «Аудитория (Audience)» → «Опубликовать приложение»: пока приложение в режиме тестирования, войти могут только добавленные тестовые пользователи. Для входа достаточно базовых прав (имя, email, фото) — проверка Google не требуется.'),
+                    setupStep,
+                ],
+            };
 
-            const vkCard = el('div', { class: 'panel-card' },
-                el('div', { class: 'panel-card__head' }, el('h2', {}, 'Вход через VK'), yesNo(vk.enabled, 'Включён', 'Не настроен')),
-                vk.enabled
+            const providerCard = (p) => el('div', { class: 'panel-card' },
+                el('div', { class: 'panel-card__head' }, el('h2', {}, `Вход через ${p.name}`), yesNo(p.enabled, 'Включён', 'Не настроен')),
+                p.enabled
                     ? el('dl', { class: 'kv' },
-                        el('dt', {}, 'ID приложения'), el('dd', {}, el('code', {}, vk.client_id)),
-                        el('dt', {}, 'Redirect URL'), el('dd', {}, copyBox(vk.redirect_uri)),
-                        el('dt', {}, 'Базовый домен'), el('dd', {}, copyBox(vk.base_domain)),
-                        el('dt', {}, 'Права'), el('dd', {}, el('code', {}, vk.scope)),
-                        el('dt', {}, 'Вошли через VK'), el('dd', {}, `${vk.users} ${plural(vk.users, 'пользователь', 'пользователя', 'пользователей')}`))
-                    : el('p', { class: 'muted' }, 'Пока ID приложения не задан, кнопки «Войти через VK» на сайте скрыты. Как подключить:'),
-                !vk.https ? el('p', { class: 'note note--warn' }, 'Сайт открыт не по https — VK принимает боевые Redirect URL только с https (для проверки на компьютере используйте домен localhost).') : null,
-                vk.enabled ? el('details', { class: 'fold' }, el('summary', {}, 'Где лежат настройки приложения VK'), vkSteps) : vkSteps,
-                el('p', { class: 'muted' }, 'Подробная инструкция с разбором ошибок: файл docs/VK_LOGIN.md в репозитории.'));
+                        el('dt', {}, 'Client ID'), el('dd', {}, el('code', {}, p.client_id)),
+                        el('dt', {}, 'Client secret'), el('dd', {}, p.secret_set ? pill('active', 'задан') : pill('pending', p.secret_required ? 'не задан' : 'не задан — не обязателен')),
+                        el('dt', {}, 'Вошли через ' + p.name), el('dd', {}, `${p.users} ${plural(p.users, 'пользователь', 'пользователя', 'пользователей')}`))
+                    : el('p', { class: 'muted' }, 'Пока ключи не заданы, кнопка «Войти через ' + p.name + '» на сайте скрыта. Как подключить:'),
+                p.enabled
+                    ? el('details', { class: 'fold' }, el('summary', {}, 'Где лежат настройки приложения'), el('ol', { class: 'steps' }, ...guides[p.code]()))
+                    : el('ol', { class: 'steps' }, ...guides[p.code]()));
+
+            const addrCard = el('div', { class: 'panel-card' },
+                el('div', { class: 'panel-card__head' }, el('h2', {}, 'Адреса для кабинетов Яндекса и Google')),
+                el('dl', { class: 'kv' },
+                    el('dt', {}, 'Redirect URI'), el('dd', {}, copyBox(oa.redirect_uri)),
+                    el('dt', {}, 'Домен сайта'), el('dd', {}, copyBox(oa.base_domain))),
+                !oa.https ? el('p', { class: 'note note--warn' }, 'Сайт открыт не по https — Google принимает боевые Redirect URI только с https (для проверки на компьютере подойдёт localhost).') : null,
+                el('p', { class: 'muted' }, 'Один и тот же адрес указывается у обоих провайдеров. Подробная инструкция с разбором ошибок: файл docs/OAUTH_LOGIN.md в репозитории.'));
 
             const wsCard = el('div', { class: 'panel-card' },
                 el('div', { class: 'panel-card__head' }, el('h2', {}, 'Чат в реальном времени (WebSocket)'), yesNo(d.ws.ok, 'Работает', 'Не отвечает')),
@@ -797,7 +816,8 @@
                     el('dt', {}, 'Демо-режим'), el('dd', {}, sys.demo ? pill('pending', 'включён — на боевом сервере выключите (APP_DEMO=0)') : pill('active', 'выключен')),
                     el('dt', {}, 'Отладка'), el('dd', {}, sys.debug ? pill('pending', 'включена — выключите (APP_DEBUG=0)') : pill('active', 'выключена'))));
 
-            content.replaceChildren(header('Интеграции', 'Вход через VK, чат и состояние сервера'), el('div', { class: 'stack' }, vkCard, wsCard, sysCard));
+            content.replaceChildren(header('Интеграции', 'Вход через Яндекс и Google, чат и состояние сервера'),
+                el('div', { class: 'stack' }, addrCard, ...oa.providers.map(providerCard), wsCard, sysCard));
         }
 
         /* --------------------------------------------------------------------- роутер */

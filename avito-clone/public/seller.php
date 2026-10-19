@@ -31,7 +31,7 @@ View::header(['title' => $seller['name'], 'page' => 'seller', 'categories' => fa
                     <span class="muted">Пока нет отзывов</span>
                 <?php endif; ?>
                 <span class="muted"><?= e($seller['member_since']) ?></span>
-                <?php if ($seller['vk_verified']): ?><span class="badge-soft"><?= View::icon('shield-check') ?>Профиль подтверждён через VK</span><?php endif; ?>
+                <?php if ($seller['social']): ?><span class="badge-soft"><?= View::icon('shield-check') ?>Профиль подтверждён через <?= e(implode(' и ', array_map([App\OAuth::class, 'name'], $seller['social']))) ?></span><?php endif; ?>
             </div>
             <?php if ($seller['about']): ?><p class="profile-head__about"><?= e($seller['about']) ?></p><?php endif; ?>
         </div>

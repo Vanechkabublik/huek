@@ -64,7 +64,7 @@ $q = $isIndex ? (string) ($_GET['q'] ?? '') : '';
                     <div class="user-menu__dropdown" role="menu">
                         <div class="user-menu__head">
                             <strong><?= e($user['name']) ?></strong>
-                            <span><?= e($user['email'] ?? 'Вход через VK') ?></span>
+                            <span><?= e($user['email'] ?? 'Вход через соцсеть') ?></span>
                         </div>
                         <a href="/profile.php" role="menuitem"><?= View::icon('settings') ?>Профиль и настройки</a>
                         <a href="/my-ads.php" role="menuitem"><?= View::icon('list') ?>Мои объявления</a>

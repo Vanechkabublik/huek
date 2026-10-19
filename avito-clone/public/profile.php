@@ -5,12 +5,14 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use App\Auth;
 use App\View;
-use App\VkAuth;
+use App\OAuth;
+use App\User;
 
 $user = Auth::requireLogin();
 
 View::header(['title' => 'Профиль и настройки', 'page' => 'profile', 'categories' => false, 'bodyClass' => 'body-soft']);
-$vkEnabled = VkAuth::enabled();
+$identities = User::identities((int) $user['id']);
+$enabledProviders = OAuth::enabledProviders();
 ?>
 <main class="container form-page">
     <a class="back-link" href="/seller.php?id=<?= (int) $user['id'] ?>"><?= View::icon('arrow-left') ?>Мой публичный профиль</a>
@@ -58,7 +60,7 @@ $vkEnabled = VkAuth::enabled();
 
     <div class="form-card form-card--stack">
         <h2>Пароль</h2>
-        <p class="form-card__sub"><?= $user['has_password'] ? 'Чтобы сменить пароль, введите текущий.' : 'Вы вошли через VK и пока не задали пароль. Задайте его, чтобы входить и по email.' ?></p>
+        <p class="form-card__sub"><?= $user['has_password'] ? 'Чтобы сменить пароль, введите текущий.' : 'Вы вошли через соцсеть и пока не задали пароль. Задайте его, чтобы входить и по email.' ?></p>
         <form id="passwordForm" novalidate>
             <?php if ($user['has_password']): ?>
                 <div class="field">
@@ -83,16 +85,25 @@ $vkEnabled = VkAuth::enabled();
         </form>
     </div>
 
-    <?php if ($vkEnabled || $user['vk_id']): ?>
+    <?php $shown = array_values(array_filter(array_keys(OAuth::PROVIDERS), fn($p) => isset($identities[$p]) || in_array($p, $enabledProviders, true))); ?>
+    <?php if ($shown): ?>
         <div class="form-card form-card--stack">
-            <h2>Вход через VK</h2>
-            <?php if ($user['vk_id']): ?>
-                <p class="form-card__sub"><?= View::icon('shield-check', 'icon--inline') ?> Аккаунт VK привязан (id <?= e((string) $user['vk_id']) ?>). Вы можете входить одним нажатием.</p>
-                <button class="btn btn--outline" type="button" id="vkUnlink">Отвязать VK</button>
-            <?php else: ?>
-                <p class="form-card__sub">Привяжите VK, чтобы входить без пароля.</p>
-                <a class="btn btn--vk btn--lg" href="/vk-login.php?link=1"><span class="vk-mark">VK</span>Привязать VK</a>
-            <?php endif; ?>
+            <h2>Вход через Яндекс и Google</h2>
+            <p class="form-card__sub">Привяжите аккаунт, чтобы входить одним нажатием — без пароля.</p>
+            <div class="identity-list">
+                <?php foreach ($shown as $p): ?>
+                    <div class="identity">
+                        <span class="identity__name"><?= View::oauthMark($p) ?><?= e(OAuth::name($p)) ?></span>
+                        <?php if (isset($identities[$p])): ?>
+                            <span class="identity__state"><?= View::icon('shield-check', 'icon--inline') ?> привязан<?= !empty($identities[$p]['email']) ? ' · ' . e($identities[$p]['email']) : '' ?></span>
+                            <button class="btn btn--outline btn--sm" type="button" data-identity-unlink="<?= e($p) ?>" data-name="<?= e(OAuth::name($p)) ?>">Отвязать</button>
+                        <?php else: ?>
+                            <span class="identity__state muted">не привязан</span>
+                            <a class="btn btn--outline btn--sm" href="/oauth-login.php?provider=<?= e($p) ?>&amp;link=1">Привязать</a>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
         </div>
     <?php endif; ?>
 </main>

@@ -7,7 +7,7 @@ declare(strict_types=1);
  *   ?action=avatar       multipart: file
  *   ?action=avatar_delete
  *   ?action=password     current?, password, password2
- *   ?action=vk_unlink
+ *   ?action=identity_unlink  provider (google | yandex)
  */
 
 require __DIR__ . '/../../src/bootstrap.php';
@@ -16,6 +16,7 @@ use App\Auth;
 use App\HttpException;
 use App\Request;
 use App\Response;
+use App\OAuth;
 use App\Upload;
 use App\User;
 use App\Validator;
@@ -63,9 +64,13 @@ switch (Request::action()) {
         User::setPassword($id, (string) $in['password']);
         Response::ok(['message' => 'Пароль сохранён']);
 
-    case 'vk_unlink':
-        User::unlinkVk($id);
-        Response::ok(['message' => 'VK отвязан']);
+    case 'identity_unlink':
+        $provider = (string) (Request::input()['provider'] ?? '');
+        if (!isset(OAuth::PROVIDERS[$provider])) {
+            throw new HttpException('Неизвестный провайдер', 422);
+        }
+        User::unlinkIdentity($id, $provider);
+        Response::ok(['message' => OAuth::name($provider) . ' отвязан']);
 
     default:
         throw new HttpException('Неизвестное действие', 404);

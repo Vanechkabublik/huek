@@ -32,9 +32,10 @@ View::header(['title' => 'Вход', 'page' => 'login', 'categories' => false, '
             <button class="btn btn--primary btn--lg btn--block" type="submit">Войти</button>
         </form>
 
-        <?php if (App\VkAuth::enabled()): ?>
+        <?php $oauth = View::oauthButtons('/oauth-login.php?next=' . rawurlencode((string) ($_GET['next'] ?? '/index.php'))); ?>
+        <?php if ($oauth !== ''): ?>
             <div class="auth__or"><span>или</span></div>
-            <a class="btn btn--vk btn--lg btn--block" href="/vk-login.php?next=<?= e(rawurlencode((string) ($_GET['next'] ?? '/index.php'))) ?>"><span class="vk-mark">VK</span>Войти через VK</a>
+            <div class="oauth-list"><?= $oauth ?></div>
         <?php endif; ?>
 
         <p class="auth__switch">Нет аккаунта? <a href="/register.php">Зарегистрироваться</a></p>

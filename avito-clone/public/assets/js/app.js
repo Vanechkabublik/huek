@@ -398,7 +398,7 @@
         initTheme();
         initFavoriteClicks();
 
-        // Одноразовые сообщения после редиректов (вход через VK, профиль и т. п.)
+        // Одноразовые сообщения после редиректов (вход через Google/Яндекс, профиль и т. п.)
         if (APP.flash && APP.flash.error) toast(APP.flash.error, 'error', 5000);
         if (APP.flash && APP.flash.ok) toast(APP.flash.ok, 'success', 3500);
     }
@@ -1507,7 +1507,7 @@
         showTab(location.hash === '#reviews' ? 'reviews' : 'ads');
     }
 
-    /** Настройки профиля: данные, аватар, пароль, привязка VK. */
+    /** Настройки профиля: данные, аватар, пароль, привязанные аккаунты Google и Яндекса. */
     function initProfile() {
         const profileForm = $('#profileForm');
         const passForm = $('#passwordForm');
@@ -1580,14 +1580,12 @@
             try { await apiPost('profile', 'avatar_delete'); paintAvatars(null); toast('Фото удалено'); } catch (err) { handleApiError(err); }
         });
 
-        // --- VK
-        const unlink = $('#vkUnlink');
-        if (unlink) {
-            unlink.addEventListener('click', async () => {
-                if (!(await confirmDialog('Вы больше не сможете входить через VK. Войти по email и паролю при этом можно.', { title: 'Отвязать VK?', confirmText: 'Отвязать' }))) return;
-                try { await apiPost('profile', 'vk_unlink'); toast('VK отвязан'); setTimeout(() => location.reload(), 600); } catch (err) { handleApiError(err); }
-            });
-        }
+        // --- привязанные аккаунты Google / Яндекс
+        $$('[data-identity-unlink]').forEach((btn) => btn.addEventListener('click', async () => {
+            const { identityUnlink: provider, name } = btn.dataset;
+            if (!(await confirmDialog(`Вы больше не сможете входить через ${name}. Войти по email и паролю при этом можно.`, { title: `Отвязать ${name}?`, confirmText: 'Отвязать' }))) return;
+            try { await apiPost('profile', 'identity_unlink', { provider }); toast(`${name} отвязан`); setTimeout(() => location.reload(), 600); } catch (err) { handleApiError(err); }
+        }));
     }
 
     /** Статистика объявления для автора: плитки и графики за 14 дней. */

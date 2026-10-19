@@ -3,7 +3,7 @@
 FROM alpine:3.20
 
 # pdo_pgsql — PostgreSQL, gd — ресайз/перекодирование фото, exif — поворот по EXIF,
-# mbstring/fileinfo/session/ctype — используются приложением, curl — обращения к API VK ID,
+# mbstring/fileinfo/session/ctype — используются приложением, curl — обращения к API Google и Яндекса,
 # su-exec — запуск без root.
 RUN apk add --no-cache php83 php83-pdo_pgsql php83-gd php83-exif php83-mbstring php83-fileinfo php83-session php83-ctype php83-curl su-exec \
     && ln -sf /usr/bin/php83 /usr/bin/php \

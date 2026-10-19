@@ -4,12 +4,12 @@ declare(strict_types=1);
 namespace App;
 
 /**
- * Пользователи: поиск, регистрация, профиль, привязка VK, публичная карточка продавца.
+ * Пользователи: поиск, регистрация, профиль, привязанные аккаунты Google/Яндекс, публичная карточка продавца.
  */
 final class User
 {
     /** Колонки без password_hash — их безопасно отдавать в шаблоны. */
-    private const SAFE_COLUMNS = 'id, email, name, phone, role, is_blocked, created_at, avatar_url, about, vk_id, last_login_at,
+    private const SAFE_COLUMNS = 'id, email, name, phone, role, is_blocked, created_at, avatar_url, about, last_login_at,
                                   (password_hash IS NOT NULL) AS has_password';
 
     /** @return array<string,mixed>|null */
@@ -24,9 +24,26 @@ final class User
         return Database::one('SELECT * FROM users WHERE email = ?', [mb_strtolower(trim($email))]);
     }
 
-    public static function findByVk(string $vkId): ?array
+    /** Пользователь, который входит через этого провайдера под этим внешним id. */
+    public static function findByIdentity(string $provider, string $externalId): ?array
     {
-        return Database::one('SELECT ' . self::SAFE_COLUMNS . ' FROM users WHERE vk_id = ?', [$vkId]);
+        return Database::one(
+            'SELECT ' . self::SAFE_COLUMNS . ' FROM users WHERE id = (SELECT user_id FROM user_identities WHERE provider = ? AND external_id = ?)',
+            [$provider, $externalId]
+        );
+    }
+
+    /**
+     * Привязанные аккаунты пользователя.
+     * @return array<string,array{provider:string,email:?string,created_at:string}> ключ — код провайдера
+     */
+    public static function identities(int $userId): array
+    {
+        $out = [];
+        foreach (Database::all('SELECT provider, email, created_at FROM user_identities WHERE user_id = ? ORDER BY id', [$userId]) as $r) {
+            $out[$r['provider']] = $r;
+        }
+        return $out;
     }
 
     public static function emailExists(string $email, ?int $exceptId = null): bool
@@ -58,16 +75,31 @@ final class User
         );
     }
 
-    /** Создаёт пользователя, пришедшего через VK (без пароля; email может отсутствовать). */
-    public static function createFromVk(string $vkId, string $name, ?string $email, ?string $avatar, ?string $phone): int
+    /**
+     * Создаёт пользователя, пришедшего через Google/Яндекс (без пароля; email может отсутствовать).
+     * @param ?string $avatar URL уже сохранённого у нас аватара
+     */
+    public static function createFromIdentity(string $provider, string $externalId, string $name, ?string $email, ?string $avatar): int
     {
         $email = $email !== null && $email !== '' && !self::emailExists($email) ? mb_strtolower(trim($email)) : null;
-        $name = trim($name) !== '' ? mb_substr(trim($name), 0, 100) : 'Пользователь VK';
-        return Database::insert(
-            "INSERT INTO users (email, password_hash, name, phone, role, vk_id, avatar_url, last_login_at)
-             VALUES (?, NULL, ?, ?, 'user', ?, ?, NOW())",
-            [$email, $name, $phone ? Format::phone($phone) : null, $vkId, $avatar ? mb_substr($avatar, 0, 500) : null]
-        );
+        $name = trim($name) !== '' ? mb_substr(trim($name), 0, 100) : 'Пользователь';
+        $pdo = Database::pdo();
+        $pdo->beginTransaction();
+        try {
+            $id = Database::insert(
+                "INSERT INTO users (email, password_hash, name, role, avatar_url, last_login_at) VALUES (?, NULL, ?, 'user', ?, NOW())",
+                [$email, $name, $avatar]
+            );
+            Database::run(
+                'INSERT INTO user_identities (user_id, provider, external_id, email) VALUES (?, ?, ?, ?)',
+                [$id, $provider, $externalId, $email]
+            );
+            $pdo->commit();
+            return $id;
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
     }
 
     public static function setPassword(int $id, string $password): void
@@ -80,29 +112,36 @@ final class User
         Database::run('UPDATE users SET last_login_at = NOW() WHERE id = ?', [$id]);
     }
 
-    public static function linkVk(int $userId, string $vkId, ?string $avatar): void
+    public static function linkIdentity(int $userId, string $provider, string $externalId, ?string $email = null): void
     {
-        $other = Database::value('SELECT id FROM users WHERE vk_id = ? AND id <> ?', [$vkId, $userId]);
-        if ($other !== null) {
-            throw new HttpException('Этот аккаунт VK уже привязан к другому профилю', 409);
+        $other = Database::value('SELECT user_id FROM user_identities WHERE provider = ? AND external_id = ?', [$provider, $externalId]);
+        if ($other !== null && (int) $other !== $userId) {
+            throw new HttpException('Этот аккаунт ' . OAuth::name($provider) . ' уже привязан к другому профилю', 409);
+        }
+        // «Заменить» аккаунт того же провайдера не даём молча: сначала отвяжите прежний
+        $mine = Database::value('SELECT external_id FROM user_identities WHERE user_id = ? AND provider = ?', [$userId, $provider]);
+        if ($mine !== null && $mine !== $externalId) {
+            throw new HttpException('К профилю уже привязан другой аккаунт ' . OAuth::name($provider) . '. Сначала отвяжите его.', 409);
         }
         Database::run(
-            'UPDATE users SET vk_id = ?, avatar_url = COALESCE(avatar_url, ?) WHERE id = ?',
-            [$vkId, $avatar, $userId]
+            'INSERT INTO user_identities (user_id, provider, external_id, email) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
+            [$userId, $provider, $externalId, $email]
         );
     }
 
-    /** Отвязка VK возможна только если есть другой способ войти — пароль. */
-    public static function unlinkVk(int $userId): void
+    /** Отвязка возможна только если останется другой способ войти: пароль или другой аккаунт. */
+    public static function unlinkIdentity(int $userId, string $provider): void
     {
         $u = self::find($userId);
-        if ($u === null || $u['vk_id'] === null) {
+        $ids = self::identities($userId);
+        if ($u === null || !isset($ids[$provider])) {
             return;
         }
-        if (!$u['has_password'] || empty($u['email'])) {
-            throw new HttpException('Сначала задайте email и пароль, иначе вы не сможете войти в аккаунт', 422);
+        $canPassword = $u['has_password'] && !empty($u['email']);
+        if (!$canPassword && count($ids) < 2) {
+            throw new HttpException('Сначала задайте email и пароль (или привяжите другой аккаунт) — иначе вы не сможете войти', 422);
         }
-        Database::run('UPDATE users SET vk_id = NULL WHERE id = ?', [$userId]);
+        Database::run('DELETE FROM user_identities WHERE user_id = ? AND provider = ?', [$userId, $provider]);
     }
 
     /**
@@ -128,7 +167,7 @@ final class User
             throw new HttpException('Проверьте правильность заполнения полей', 422, $errors);
         }
         $cur = self::find($id);
-        // Email можно задать, если его не было (VK-аккаунт), и сменить; удалить — нельзя, если нет VK
+        // Email можно задать, если его не было (вход через Google/Яндекс), и сменить; стереть поле — значит оставить прежний
         $newEmail = $email !== '' ? $email : ($cur['email'] ?? null);
         Database::run(
             'UPDATE users SET name = ?, phone = ?, about = ?, email = ? WHERE id = ?',
@@ -178,7 +217,7 @@ final class User
                 [$id]
             ),
             'has_phone'    => !empty($u['phone']),
-            'vk_verified'  => $u['vk_id'] !== null,
+            'social'       => array_keys(self::identities((int) $u['id'])),
             'is_blocked'   => (bool) $u['is_blocked'],
             'rating'       => $rating['avg'],
             'reviews'      => $rating['count'],

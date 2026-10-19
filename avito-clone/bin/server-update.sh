@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Обновление боевого сервера, где сайт стоит за nginx на хосте (docker-compose.nginx.yml):
 #   bash bin/server-update.sh
-#   VK_CLIENT_ID=12345678 bash bin/server-update.sh      # заодно включить вход через VK
+# Ключи входа через Яндекс/Google задаются отдельным скриптом: bash bin/setup-oauth.sh
 # Что делает: git pull → дописывает недостающие ключи в .env (генерирует APP_SECRET) →
 # пересобирает и перезапускает app/ws/db (миграции БД применяются сами) →
 # добавляет в nginx проксирование WebSocket (/ws), проверяет конфиг и перезагружает nginx.
@@ -35,11 +35,11 @@ if [ -z "$(get_env APP_SECRET)" ]; then
     set_env APP_SECRET "$(openssl rand -hex 32)"
     echo "APP_SECRET сгенерирован"
 fi
-grep -q '^VK_CLIENT_ID=' .env || set_env VK_CLIENT_ID ""
-if [ -n "${VK_CLIENT_ID:-}" ]; then
-    set_env VK_CLIENT_ID "$VK_CLIENT_ID"
-    echo "VK_CLIENT_ID записан"
-fi
+for key in YANDEX_CLIENT_ID YANDEX_CLIENT_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
+    grep -q "^${key}=" .env || set_env "$key" ""
+done
+# Старые настройки входа через VK больше не нужны
+sed -i '/^VK_CLIENT_ID=/d;/^VK_SCOPE=/d' .env
 DOMAIN="$(get_env DOMAIN)"
 
 say "Собираю и перезапускаю контейнеры (app, ws, db)"
@@ -96,4 +96,9 @@ if [ -n "$DOMAIN" ]; then
     printf 'WebSocket: '; curl -s -o /dev/null -w '%{http_code} (400/426 — это нормально без Upgrade, главное — не 502/404)\n' "https://$DOMAIN/ws" || true
 fi
 echo
-echo "Готово. Вход через VK: $( [ -n "$(get_env VK_CLIENT_ID)" ] && echo включён || echo 'не настроен — инструкция в docs/VK_LOGIN.md' )"
+yandex=$([ -n "$(get_env YANDEX_CLIENT_ID)" ] && echo включён || echo 'не настроен')
+google=$([ -n "$(get_env GOOGLE_CLIENT_ID)" ] && echo включён || echo 'не настроен')
+echo "Готово. Вход через Яндекс: $yandex; через Google: $google."
+if [ "$yandex" != "включён" ] || [ "$google" != "включён" ]; then
+    echo "Настроить: bash bin/setup-oauth.sh (инструкция — docs/OAUTH_LOGIN.md)"
+fi

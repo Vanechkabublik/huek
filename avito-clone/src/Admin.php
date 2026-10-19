@@ -39,14 +39,13 @@ final class Admin
     }
 
     /**
-     * Состояние интеграций для раздела «Интеграции»: вход через VK, WebSocket чата, окружение.
-     * Секреты (APP_SECRET, ключи VK) не отдаются — только факт, что они заданы.
+     * Состояние интеграций для раздела «Интеграции»: вход через Яндекс и Google, WebSocket чата, окружение.
+     * Секреты (APP_SECRET, ключи провайдеров) не отдаются — только факт, что они заданы.
      * @return array<string,mixed>
      */
     public static function integrations(): array
     {
-        $appUrl   = VkAuth::appUrl();
-        $clientId = (string) getenv('VK_CLIENT_ID');
+        $appUrl = OAuth::appUrl();
 
         // Живость WS-сервера: из контейнера app он виден как ws:8081, при запуске без Docker — 127.0.0.1
         $port = Realtime::publicPort();
@@ -61,14 +60,15 @@ final class Admin
         }
 
         return [
-            'vk' => [
-                'enabled'      => VkAuth::enabled(),
-                'client_id'    => $clientId,
-                'redirect_uri' => VkAuth::redirectUri(),
+            'oauth' => [
+                'redirect_uri' => OAuth::redirectUri(),
                 'base_domain'  => (string) parse_url($appUrl, PHP_URL_HOST),
                 'https'        => str_starts_with($appUrl, 'https://'),
-                'scope'        => (string) (getenv('VK_SCOPE') ?: 'vkid.personal_info'),
-                'users'        => (int) Database::value('SELECT COUNT(*) FROM users WHERE vk_id IS NOT NULL'),
+                'providers'    => array_map(static fn(string $p) => [
+                    'code'  => $p,
+                    'name'  => OAuth::name($p),
+                    'users' => (int) Database::value('SELECT COUNT(*) FROM user_identities WHERE provider = ?', [$p]),
+                ] + OAuth::status($p), array_keys(OAuth::PROVIDERS)),
             ],
             'ws' => [
                 'ok'         => $wsOk,
@@ -131,7 +131,7 @@ final class Admin
 
     /**
      * Поиск пользователей: по email, имени, телефону или «#id».
-     * @param string $filter all | active | blocked | admin | vk
+     * @param string $filter all | active | blocked | admin | social
      * @return array{items:array,total:int,has_more:bool}
      */
     public static function users(string $query, string $filter = 'all', int $page = 1): array
@@ -148,7 +148,7 @@ final class Admin
             'active'  => "u.is_blocked = 0 AND u.role = 'user'",
             'blocked' => 'u.is_blocked = 1',
             'admin'   => "u.role = 'admin'",
-            'vk'      => 'u.vk_id IS NOT NULL',
+            'social'  => 'EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = u.id)',
             default   => '1 = 1',
         };
         $w = implode(' AND ', $where);
@@ -157,8 +157,9 @@ final class Admin
         $limit  = self::PER_PAGE;
         $offset = (max(1, $page) - 1) * $limit;
         $rows = Database::all(
-            "SELECT u.id, u.email, u.name, u.phone, u.role, u.is_blocked, u.created_at, u.last_login_at, u.vk_id, u.avatar_url,
-                    (SELECT COUNT(*) FROM ads WHERE user_id = u.id) AS ads_count
+            "SELECT u.id, u.email, u.name, u.phone, u.role, u.is_blocked, u.created_at, u.last_login_at, u.avatar_url,
+                    (SELECT COUNT(*) FROM ads WHERE user_id = u.id) AS ads_count,
+                    (SELECT string_agg(i.provider, ',' ORDER BY i.id) FROM user_identities i WHERE i.user_id = u.id) AS social
              FROM users u WHERE $w ORDER BY u.id DESC LIMIT $limit OFFSET $offset",
             $params
         );
@@ -181,7 +182,7 @@ final class Admin
             'role'       => $r['role'],
             'is_blocked' => (bool) $r['is_blocked'],
             'ads_count'  => (int) $r['ads_count'],
-            'has_vk'     => $r['vk_id'] !== null,
+            'social'     => $r['social'] !== null ? explode(',', (string) $r['social']) : [],
             'avatar'     => $r['avatar_url'] ?: null,
             'created_at' => Format::dateFull($r['created_at']),
             'last_login' => $r['last_login_at'] ? Format::date($r['last_login_at']) : 'не входил',
@@ -210,7 +211,7 @@ final class Admin
                 'about'      => $u['about'],
                 'role'       => $u['role'],
                 'is_blocked' => (bool) $u['is_blocked'],
-                'vk_id'      => $u['vk_id'],
+                'social'     => array_map(static fn(array $i) => ['code' => $i['provider'], 'name' => OAuth::name($i['provider']), 'email' => $i['email']], array_values(User::identities($id))),
                 'avatar'     => User::avatarUrl($u),
                 'created_at' => Format::dateFull($u['created_at']),
                 'last_login' => $u['last_login_at'] ? Format::dateFull($u['last_login_at']) : 'не входил',
@@ -472,15 +473,15 @@ final class Admin
     public static function exportUsers(): array
     {
         $rows = Database::all(
-            "SELECT u.id, u.email, u.name, u.phone, u.role, u.is_blocked, (u.vk_id IS NOT NULL) AS vk,
+            "SELECT u.id, u.email, u.name, u.phone, u.role, u.is_blocked, (SELECT string_agg(i.provider, ', ' ORDER BY i.id) FROM user_identities i WHERE i.user_id = u.id) AS social,
                     (SELECT COUNT(*) FROM ads WHERE user_id = u.id) AS ads_count, u.created_at, u.last_login_at
              FROM users u ORDER BY u.id"
         );
         return [
-            'header' => ['ID', 'Email', 'Имя', 'Телефон', 'Роль', 'Заблокирован', 'VK', 'Объявлений', 'Регистрация', 'Последний вход'],
+            'header' => ['ID', 'Email', 'Имя', 'Телефон', 'Роль', 'Заблокирован', 'Соцсети', 'Объявлений', 'Регистрация', 'Последний вход'],
             'rows'   => array_map(static fn(array $r) => [
                 $r['id'], $r['email'], $r['name'], $r['phone'], $r['role'], $r['is_blocked'] ? 'да' : 'нет',
-                $r['vk'] ? 'да' : 'нет', $r['ads_count'], substr((string) $r['created_at'], 0, 19), substr((string) $r['last_login_at'], 0, 19),
+                $r['social'] ?? '', $r['ads_count'], substr((string) $r['created_at'], 0, 19), substr((string) $r['last_login_at'], 0, 19),
             ], $rows),
         ];
     }

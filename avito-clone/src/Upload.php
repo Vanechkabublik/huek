@@ -74,7 +74,46 @@ final class Upload
         return self::url($name);
     }
 
-    /** Удаляет файл аватара, если он наш (а не внешний URL из VK). */
+    /**
+     * Скачивает аватар с сервиса входа (Google/Яндекс) и сохраняет у себя — так мы не светим IP посетителей
+     * чужим серверам и не зависим от их ссылок. Только https и только известные хосты картинок.
+     * Любая неудача → null (аккаунт просто останется с буквой вместо фото).
+     */
+    public static function storeAvatarFromUrl(string $url): ?string
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        if ($host === '' || !self::avatarHostAllowed($host, (string) parse_url($url, PHP_URL_SCHEME))) {
+            return null;
+        }
+        $tmp = tempnam(sys_get_temp_dir(), 'avt');
+        if ($tmp === false) {
+            return null;
+        }
+        try {
+            $size = Http::download($url, $tmp, self::MAX_BYTES);
+            if ($size === null) {
+                return null;
+            }
+            return self::storeAvatar(['error' => UPLOAD_ERR_OK, 'tmp_name' => $tmp, 'size' => $size, '_local' => true]);
+        } catch (\Throwable) {
+            return null;
+        } finally {
+            @unlink($tmp);
+        }
+    }
+
+    private static function avatarHostAllowed(string $host, string $scheme): bool
+    {
+        // Только тесты с заглушкой OAuth (OAUTH_MOCK_BASE) разрешают её хост по http
+        $mock = (string) getenv('OAUTH_MOCK_BASE');
+        if ($mock !== '' && $host === strtolower((string) parse_url($mock, PHP_URL_HOST))) {
+            return true;
+        }
+        return $scheme === 'https'
+            && ($host === 'avatars.yandex.net' || str_ends_with($host, '.googleusercontent.com'));
+    }
+
+    /** Удаляет файл аватара, если он наш (а не внешний URL). */
     public static function removeAvatarUrl(?string $url): void
     {
         if ($url !== null && str_starts_with($url, UPLOAD_URL . '/av_')) {
@@ -171,7 +210,8 @@ final class Upload
     private static function assertUploaded(array $file): void
     {
         $err = $file['error'] ?? UPLOAD_ERR_NO_FILE;
-        if ($err === UPLOAD_ERR_OK && is_uploaded_file($file['tmp_name'] ?? '')) {
+        // _local — файл, который скачали мы сами (аватар из Google/Яндекс), а не загрузил браузер
+        if ($err === UPLOAD_ERR_OK && (!empty($file['_local']) || is_uploaded_file($file['tmp_name'] ?? ''))) {
             return;
         }
         throw new HttpException(match ($err) {

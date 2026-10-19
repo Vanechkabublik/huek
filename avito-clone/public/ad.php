@@ -137,7 +137,7 @@ View::header([
                         <?php else: ?>
                             <span class="seller__since">Пока нет отзывов</span>
                         <?php endif; ?>
-                        <span class="seller__since"><?= e($seller['member_since']) ?><?= $seller['vk_verified'] ? ' · ' . View::icon('shield-check', 'icon--inline') . ' через VK' : '' ?></span>
+                        <span class="seller__since"><?= e($seller['member_since']) ?><?= $seller['social'] ? ' · ' . View::icon('shield-check', 'icon--inline') . ' ' . e(implode(' и ', array_map([App\OAuth::class, 'name'], $seller['social']))) : '' ?></span>
                         <a class="seller__link" href="/seller.php?id=<?= $seller['id'] ?>">Профиль и объявления (<?= $seller['ads_count'] ?>)</a>
                     </div>
                 </div>

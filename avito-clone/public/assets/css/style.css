@@ -957,7 +957,7 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 
 /* ==========================================================================
    15. Новые компоненты: тема, избранное, профиль продавца, характеристики,
-       подсказки городов, статистика, чат, VK, расширенная админка
+       подсказки городов, статистика, чат, вход через Яндекс/Google, расширенная админка
    ========================================================================== */
 
 /* Шапка: иконки-кнопки и переключатель темы */
@@ -1076,11 +1076,22 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 .form-card--stack h2 { margin-bottom: 4px; }
 .form-card--stack .form-card__sub { margin-bottom: 20px; }
 
-/* VK */
-.btn--vk { background: #0077ff; color: #fff; }
-.btn--vk:hover { background: #0066dd; color: #fff; }
-.btn--vk:active { background: #0057bd; }
-.vk-mark { display: inline-grid; place-items: center; width: 30px; height: 20px; border-radius: 5px; background: #fff; color: #0077ff; font-size: 12px; font-weight: 800; letter-spacing: -0.03em; }
+/* Вход через Яндекс / Google */
+.oauth-list { display: grid; gap: 10px; }
+.btn--oauth { gap: 12px; font-weight: 600; }
+.btn--oauth-google { background: #fff; color: #1f1f1f; border: 1px solid #dadce0; }
+.btn--oauth-google:hover { background: #f8f9fa; color: #1f1f1f; box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.btn--oauth-yandex { background: #000; color: #fff; border: 1px solid #000; }
+.btn--oauth-yandex:hover { background: #1a1a1a; color: #fff; }
+:root[data-theme="dark"] .btn--oauth-yandex { background: #1c1c1e; border-color: #3a3a3c; }
+.oauth-mark { flex: none; width: 20px; height: 20px; }
+.oauth-mark--yandex { display: inline-grid; place-items: center; border-radius: 50%; background: #fc3f1d; color: #fff; font-size: 13px; font-weight: 800; line-height: 1; }
+.identity-list { display: grid; gap: 10px; margin-top: 14px; }
+.identity { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border-2); border-radius: var(--r-btn); }
+.identity__name { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; }
+.identity__state { font-size: 14px; color: var(--green-text); overflow-wrap: anywhere; }
+.identity__state.muted { color: var(--muted); }
+@media (max-width: 560px) { .identity { grid-template-columns: 1fr auto; } .identity__state { grid-column: 1 / -1; order: 3; } }
 .auth__or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; color: var(--muted); font-size: 13px; }
 .auth__or::before, .auth__or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
