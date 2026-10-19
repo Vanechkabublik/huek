@@ -970,7 +970,8 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
     .search__btn { padding: 0 12px; }
     .search__btn-text { display: none; }
     .search__btn-icon { display: block; }
-    .city-btn { max-width: 128px; padding: 0 10px; }
+    .city-btn { max-width: 140px; padding: 0 10px; }
+    .city-btn .city-btn__chev { display: none; }
     .grid, .grid--my { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     /* на узком экране карточка — горизонтальная: фото слева, текст справа */
     .card__link { flex-direction: row; }

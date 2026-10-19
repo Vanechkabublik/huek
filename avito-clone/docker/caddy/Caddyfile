@@ -7,9 +7,9 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Фото до 5 МБ + служебные поля формы
+	# Фото до 5 МБ, видеообзор до 50 МБ + служебные поля формы
 	request_body {
-		max_size 12MB
+		max_size 64MB
 	}
 
 	header {

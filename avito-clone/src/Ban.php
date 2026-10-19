@@ -76,7 +76,7 @@ final class Ban
     public static function ipMessage(array $ban): string
     {
         $reason = trim((string) $ban['reason']) !== '' ? trim((string) $ban['reason']) : self::NO_REASON;
-        return 'Доступ с вашего IP-адреса ограничен. Причина: ' . $reason . self::untilText($ban['expires_at'] ?? null, 'ограничение действует');
+        return 'Доступ с вашего IP-адреса ограничен. Причина: ' . self::sentence($reason) . self::untilText($ban['expires_at'] ?? null, 'ограничение действует');
     }
 
     /** Закрывает вход и регистрацию для забаненного адреса (любой вид бана). */
@@ -117,15 +117,21 @@ final class Ban
     public static function userMessage(array $user): string
     {
         $reason = trim((string) ($user['ban_reason'] ?? '')) !== '' ? trim((string) $user['ban_reason']) : self::NO_REASON;
-        return 'Ваш аккаунт заблокирован. Причина: ' . $reason . self::untilText($user['banned_until'] ?? null, 'блокировка действует');
+        return 'Ваш аккаунт заблокирован. Причина: ' . self::sentence($reason) . self::untilText($user['banned_until'] ?? null, 'блокировка действует');
+    }
+
+    /** Причина как законченное предложение: точка в конце — только если администратор не поставил свой знак. */
+    private static function sentence(string $reason): string
+    {
+        return preg_match('/[.!?…]$/u', $reason) ? $reason : $reason . '.';
     }
 
     private static function untilText(?string $until, string $verb): string
     {
         if ($until === null || $until === '') {
-            return '.';
+            return '';
         }
-        return '. Срок: ' . $verb . ' до ' . date('d.m.Y H:i', (int) strtotime($until)) . '.';
+        return ' Срок: ' . $verb . ' до ' . date('d.m.Y H:i', (int) strtotime($until)) . '.';
     }
 
     /**

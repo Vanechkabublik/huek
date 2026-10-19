@@ -110,3 +110,9 @@ docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d app 
 
 - Яндекс: [запрос кода и PKCE](https://yandex.ru/dev/id/doc/ru/codes/code-url), [информация о пользователе](https://yandex.ru/dev/id/doc/ru/user-information), [регистрация приложения](https://yandex.ru/dev/id/doc/ru/register-auth)
 - Google: [OAuth 2.0 для веб-серверов](https://developers.google.com/identity/protocols/oauth2/web-server), [OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect), [управление OAuth-клиентами](https://support.google.com/cloud/answer/15549257)
+
+## Согласие с политикой
+
+Кнопки «Войти через Яндекс / Google» работают только после того, как посетитель отметил галочку согласия с Политикой обработки персональных данных и Пользовательским соглашением (она находится на страницах входа и регистрации). Тексты документов и реквизиты оператора редактируются в админке: «Документы».
+
+Заблокированному пользователю (аккаунт или IP) вход через Яндекс/Google тоже закрыт — после проверки учётных данных он увидит причину и срок блокировки.

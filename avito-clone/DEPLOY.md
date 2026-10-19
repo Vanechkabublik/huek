@@ -152,7 +152,7 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
    server {
        listen 80;
        server_name board.example.com;
-       client_max_body_size 12m;
+       client_max_body_size 64m;          # фото до 5 МБ, видеообзор до 50 МБ
 
        # WebSocket чата — обязательно ДО location /
        location /ws {
@@ -169,8 +169,10 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
        location / {
            proxy_pass http://127.0.0.1:8080;
            proxy_set_header Host $host;
-           proxy_set_header X-Forwarded-For $remote_addr;
+           proxy_set_header X-Forwarded-For $remote_addr;   # по нему сайт узнаёт реальный IP посетителя (баны, аналитика)
            proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_read_timeout 120s;                         # загрузка видео с медленного телефона
+           proxy_send_timeout 120s;
        }
    }
    ```
@@ -178,6 +180,25 @@ tar czf uploads-$(date +%F).tar.gz public/uploads
 3. Проверить и применить: `sudo nginx -t && sudo systemctl reload nginx`.
 4. Сертификат: `sudo apt install -y certbot python3-certbot-nginx && sudo certbot --nginx -d board.example.com`
    (certbot сам допишет https и редирект и настроит автопродление).
+
+## Реальный IP, геолокация, видео и политика данных
+
+- **IP и User-Agent посетителя.** Сайт берёт IP из заголовка `X-Forwarded-For`, но только если запрос пришёл от доверенного прокси
+  (по умолчанию localhost и частные сети — этого хватает для Caddy и для nginx на том же сервере). Строка
+  `proxy_set_header X-Forwarded-For $remote_addr;` в nginx обязательна — без неё все посетители будут «на одном IP»
+  и бан по IP заденет всех. Свой список доверенных прокси — переменная `TRUSTED_PROXIES` в `.env` (CIDR через запятую).
+  Если сайт стоит за Cloudflare, добавьте его диапазоны в `TRUSTED_PROXIES` — иначе IP посетителей будут адресами Cloudflare.
+  Проверить: войдите на сайт и откройте «Админка → Безопасность → Журнал входов» — там должен быть ваш реальный IP, а не `172.x`/`127.0.0.1`.
+- **Геолокация города.** Браузер спрашивает разрешение сам; работает только по `https://` (в браузере это требование «безопасного контекста»).
+  Координаты округляются до ~1 км и превращаются в город через OpenStreetMap Nominatim; результат кэшируется в БД.
+  Публичный Nominatim бесплатен, но с лимитом ~1 запрос/сек — для большого трафика укажите свой сервер в `GEOCODER_URL`.
+  Если геолокация недоступна, пользователь выбирает город вручную.
+- **Видеообзор.** MP4/MOV/WebM до 50 МБ и до 3 минут. Лимиты загрузки уже подняты: `php.ini` (52M), Caddy (`max_size 64MB`),
+  nginx (`client_max_body_size 64m`) — `bash bin/server-update.sh` исправит это в конфиге nginx сам. Ролики отдаются с поддержкой
+  перемотки (HTTP Range); при большой нагрузке лучше отдавать `/uploads/` напрямую средствами nginx/Caddy.
+- **Политика обработки данных и соглашение** — шаблоны, которые редактируются в «Админка → Документы». Обязательно впишите
+  реквизиты оператора («Название и контакты») и проверьте тексты с юристом: сервис не заменяет юридическую консультацию.
+  При каждом изменении текста версия согласия растёт, и пользователям снова предлагается принять документ.
 
 ## Замечание о производительности
 

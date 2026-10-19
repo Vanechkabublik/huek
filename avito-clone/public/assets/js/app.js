@@ -700,6 +700,15 @@
     }
 
     function initCity() {
+        // на узких экранах поле поиска в шапке тесное — короткая подсказка
+        const search = $('#searchInput');
+        if (search && window.matchMedia) {
+            const mq = window.matchMedia('(max-width: 519px)');
+            const full = search.placeholder;
+            const apply = () => { search.placeholder = mq.matches ? 'Поиск' : full; };
+            apply();
+            mq.addEventListener?.('change', apply);
+        }
         const btn = $('#cityBtn');
         if (!btn) return;
         btn.addEventListener('click', () => { $('.city-hint')?.remove(); openCityPicker(); });

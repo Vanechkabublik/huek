@@ -4,7 +4,8 @@
 # Ключи входа через Яндекс/Google задаются отдельным скриптом: bash bin/setup-oauth.sh
 # Что делает: git pull → дописывает недостающие ключи в .env (генерирует APP_SECRET) →
 # пересобирает и перезапускает app/ws/db (миграции БД применяются сами) →
-# добавляет в nginx проксирование WebSocket (/ws), проверяет конфиг и перезагружает nginx.
+# добавляет в nginx проксирование WebSocket (/ws), лимит загрузок 64m (видео) и X-Forwarded-For (реальный IP),
+# проверяет конфиг и перезагружает nginx.
 # Можно запускать повторно — все шаги идемпотентны.
 set -euo pipefail
 
@@ -86,6 +87,41 @@ else
             echo "nginx -t не прошёл — конфиг возвращён из $latest" >&2
             exit 1
         fi
+    fi
+fi
+
+say "Настраиваю nginx: размер загрузок (видео до 50 МБ) и реальный IP посетителей"
+if [ -f "$NGINX_CONF" ]; then
+    changed=0
+    cp "$NGINX_CONF" "$NGINX_CONF.bak.$(date +%s)"
+    # 1) client_max_body_size не меньше 64m (во всех серверных блоках файла)
+    if grep -Eq 'client_max_body_size' "$NGINX_CONF"; then
+        if grep -Eq 'client_max_body_size[[:space:]]+([0-9]|[1-5][0-9]|6[0-3])m;' "$NGINX_CONF"; then
+            sed -i -E 's/(client_max_body_size[[:space:]]+)([0-9]|[1-5][0-9]|6[0-3])m;/\164m;/' "$NGINX_CONF"; changed=1
+            echo "client_max_body_size увеличен до 64m"
+        fi
+    else
+        awk '{ print } !done && $0 ~ /^[[:space:]]*server_name[[:space:]]/ { print "    client_max_body_size 64m;"; done = 1 }' "$NGINX_CONF" > "$NGINX_CONF.new" \
+            && cp "$NGINX_CONF.new" "$NGINX_CONF" && rm -f "$NGINX_CONF.new"; changed=1
+        echo "client_max_body_size 64m добавлен"
+    fi
+    # 2) location / должен передавать X-Forwarded-For (иначе все посетители будут с одним IP)
+    if ! awk '/location[[:space:]]+\/[[:space:]]*\{/ {inloc=1} inloc && /X-Forwarded-For/ {found=1} inloc && /^[[:space:]]*\}/ {inloc=0} END {exit !found}' "$NGINX_CONF"; then
+        proto=1; grep -q 'X-Forwarded-Proto' "$NGINX_CONF" && proto=0
+        awk -v proto="$proto" '{ print } !done && $0 ~ /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/ { print "        proxy_set_header X-Forwarded-For $remote_addr;"; if (proto == 1) print "        proxy_set_header X-Forwarded-Proto $scheme;"; done = 1 }' "$NGINX_CONF" > "$NGINX_CONF.new" \
+            && cp "$NGINX_CONF.new" "$NGINX_CONF" && rm -f "$NGINX_CONF.new"; changed=1
+        echo "в location / добавлена передача X-Forwarded-For"
+    fi
+    if [ "$changed" = 1 ]; then
+        if nginx -t; then
+            systemctl reload nginx && echo "nginx перезагружен"
+        else
+            latest="$(ls -t "$NGINX_CONF".bak.* | head -n1)"
+            cp "$latest" "$NGINX_CONF"
+            echo "nginx -t не прошёл — конфиг возвращён из $latest. Поправьте client_max_body_size и X-Forwarded-For вручную (DEPLOY.md)" >&2
+        fi
+    else
+        echo "Всё уже настроено"
     fi
 fi
 
