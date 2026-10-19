@@ -51,7 +51,7 @@ View::header([
                     <select class="select" id="fCategory" name="category">
                         <option value="0">Все категории</option>
                         <?php foreach ($categories as $c): ?>
-                            <option value="<?= $c['id'] ?>"<?= $f['category'] === $c['id'] ? ' selected' : '' ?>><?= e($c['icon'] . ' ' . $c['name']) ?></option>
+                            <option value="<?= $c['id'] ?>"<?= $f['category'] === $c['id'] ? ' selected' : '' ?>><?= e($c['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>

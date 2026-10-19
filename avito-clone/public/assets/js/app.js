@@ -397,6 +397,7 @@
 
         initTheme();
         initFavoriteClicks();
+        initCity();
 
         // Одноразовые сообщения после редиректов (вход через Google/Яндекс, профиль и т. п.)
         if (APP.flash && APP.flash.error) toast(APP.flash.error, 'error', 5000);
@@ -563,6 +564,149 @@
     }
 
     /* ======================================================================
+       4c. Город посетителя: выбор вручную и определение по геопозиции из браузера
+       ====================================================================== */
+
+    const cityLabel = (c) => (c === null ? 'Выберите город' : c === 'all' ? 'Все города' : c);
+
+    function paintCity() {
+        const label = $('#cityLabel');
+        if (label) label.textContent = cityLabel(APP.city);
+    }
+
+    /** Запоминает город на сервере (cookie + профиль) и сообщает страницам: document 'city:changed'. */
+    async function setCity(city, { silent = false } = {}) {
+        const res = await apiPost('geo', 'set', { city });
+        APP.city = res.city;
+        paintCity();
+        if (!silent) document.dispatchEvent(new CustomEvent('city:changed', { detail: { city: res.city } }));
+        return res.city;
+    }
+
+    function getPosition() {
+        return new Promise((resolve, reject) => {
+            if (!('geolocation' in navigator)) return reject(new Error('Браузер не поддерживает определение местоположения.'));
+            if (!window.isSecureContext) return reject(new Error('Определение местоположения работает только по защищённому соединению (https).'));
+            navigator.geolocation.getCurrentPosition(resolve, (err) => reject(new Error(
+                err.code === 1 ? 'Доступ к геопозиции запрещён. Разрешите его в настройках браузера или выберите город из списка.'
+                    : err.code === 3 ? 'Не удалось получить местоположение вовремя. Попробуйте ещё раз или выберите город из списка.'
+                        : 'Не удалось определить местоположение. Выберите город из списка.')),
+            { enableHighAccuracy: false, timeout: 12000, maximumAge: 10 * 60 * 1000 });
+        });
+    }
+
+    /**
+     * Спрашивает у браузера геопозицию, отправляет на сервер округлённые до ~1 км координаты (точное место серверу не нужно)
+     * и запоминает найденный город. Возвращает название города. onStatus — подсказки для интерфейса.
+     */
+    async function detectCity(onStatus = () => {}) {
+        onStatus('Браузер запрашивает доступ к вашему местоположению…');
+        const pos = await getPosition();
+        onStatus('Определяем город…');
+        const round = (v) => Math.round(v * 100) / 100;
+        const found = await apiPost('geo', 'resolve', { lat: round(pos.coords.latitude), lon: round(pos.coords.longitude) });
+        return setCity(found.city);
+    }
+
+    /** Окно выбора города: поиск по списку, «все города», кнопка автоопределения. */
+    async function openCityPicker() {
+        const cities = await loadCities();
+        const norm = (s) => s.toLowerCase().replaceAll('ё', 'е');
+        const status = el('p', { class: 'city-picker__status', 'aria-live': 'polite' });
+        const list = el('div', { class: 'city-picker__list', role: 'listbox' });
+        const input = el('input', { class: 'input', type: 'search', placeholder: 'Введите название города', autocomplete: 'off', 'aria-label': 'Город' });
+        const detectBtn = el('button', { type: 'button', class: 'btn btn--outline btn--block city-picker__geo' }, icon('crosshair'), 'Определить автоматически');
+        const content = el('div', { class: 'city-picker' }, detectBtn, status, input, list);
+        const close = () => content.closest('form')?.requestSubmit();
+
+        const choose = async (value) => {
+            try { await setCity(value); close(); } catch (err) { handleApiError(err); }
+        };
+
+        function render() {
+            const q = norm(input.value.trim());
+            const found = q
+                ? [...cities.filter((c) => norm(c).startsWith(q)), ...cities.filter((c) => !norm(c).startsWith(q) && norm(c).includes(q))].slice(0, 30)
+                : cities.slice(0, 16);
+            const rows = [];
+            if (!q) rows.push(el('button', { type: 'button', class: `city-picker__item${APP.city === 'all' ? ' is-active' : ''}`, onClick: () => choose('all') }, icon('globe'), 'Все города'));
+            found.forEach((name) => rows.push(el('button', { type: 'button', role: 'option', class: `city-picker__item${APP.city === name ? ' is-active' : ''}`, onClick: () => choose(name) },
+                icon('map-pin'), name)));
+            if (!found.length) rows.push(el('p', { class: 'muted city-picker__none' }, 'Такого города нет в списке. Можно указать свой — нажмите Enter.'));
+            list.replaceChildren(...rows);
+        }
+        input.addEventListener('input', render);
+        input.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();                                   // иначе форма модалки закроется
+            const v = input.value.trim();
+            if (v) choose(v);
+        });
+        detectBtn.addEventListener('click', async () => {
+            setLoading(detectBtn, true);
+            status.classList.remove('is-error');
+            try {
+                const city = await detectCity((t) => { status.textContent = t; });
+                status.textContent = `Ваш город — ${city}`;
+                close();
+                toast(`Город: ${city}`, 'success', 2200);
+            } catch (err) {
+                status.textContent = err.message;
+                status.classList.add('is-error');
+            } finally {
+                setLoading(detectBtn, false);
+            }
+        });
+        render();
+        await openModal({ title: 'Выберите город', content, submitText: 'Закрыть', submitKind: 'btn--outline', hideCancel: true, modalClass: 'modal--city' });
+    }
+
+    /** Всплывающая подсказка у кнопки города для тех, кто ещё не выбирал город. */
+    function showCityHint() {
+        const btn = $('#cityBtn');
+        if (!btn || APP.city !== null) return;
+        try { if (Number(localStorage.getItem('cityHintUntil')) > Date.now()) return; } catch { /* приватный режим */ }
+        const dismiss = (days) => {
+            try { localStorage.setItem('cityHintUntil', String(Date.now() + days * 86400000)); } catch { /* приватный режим */ }
+            hint.remove();
+        };
+        const detect = el('button', { type: 'button', class: 'btn btn--primary btn--sm' }, icon('crosshair'), 'Определить');
+        const hint = el('div', { class: 'city-hint', role: 'dialog', 'aria-label': 'Определение города' },
+            el('button', { type: 'button', class: 'icon-btn city-hint__close', 'aria-label': 'Закрыть', onClick: () => dismiss(3) }, icon('x')),
+            el('strong', {}, 'Определить ваш город?'),
+            el('p', {}, 'Покажем объявления рядом с вами. Браузер спросит разрешение на доступ к геопозиции.'),
+            el('div', { class: 'city-hint__actions' }, detect,
+                el('button', { type: 'button', class: 'btn btn--outline btn--sm', onClick: () => { dismiss(3); openCityPicker(); } }, 'Выбрать вручную')));
+        detect.addEventListener('click', async () => {
+            setLoading(detect, true);
+            try {
+                const city = await detectCity();
+                hint.remove();
+                toast(`Город: ${city}`, 'success', 2200);
+            } catch (err) {
+                setLoading(detect, false);
+                toast(err.message, 'warning', 5000);
+                dismiss(3);
+            }
+        });
+        document.body.append(hint);
+        const place = () => {
+            const r = btn.getBoundingClientRect();
+            hint.style.top = `${Math.round(r.bottom + 10)}px`;
+            hint.style.left = `${Math.max(12, Math.round(r.left))}px`;
+        };
+        place();
+        window.addEventListener('resize', place, { passive: true });
+    }
+
+    function initCity() {
+        const btn = $('#cityBtn');
+        if (!btn) return;
+        btn.addEventListener('click', () => { $('.city-hint')?.remove(); openCityPicker(); });
+        if (['index', 'ad', 'favorites', 'seller'].includes(document.body.dataset.page)) setTimeout(showCityHint, 900);
+    }
+
+    /* ======================================================================
        4d. Графики (SVG без библиотек)
        ====================================================================== */
 
@@ -631,7 +775,7 @@
         if (owner || ad.status !== 'approved') badges.append(el('span', { class: `badge badge--${ad.status}` }, ad.status_label));
         if (ad.is_hit && ad.status === 'approved') badges.append(el('span', { class: 'badge badge--hit' }, icon('flame'), 'Хит'));
         if (badges.children.length) media.append(badges);
-        if (ad.images_count > 1) media.append(el('span', { class: 'card__photos' }, icon('camera'), String(ad.images_count)));
+        if (ad.images_count > 1 || ad.has_video) media.append(el('span', { class: 'card__photos' }, icon('camera'), String(ad.images_count), ad.has_video ? icon('video') : null));
 
         const card = el('article', { class: 'card', style: { animationDelay: Math.min(index, 11) * 35 + 'ms' } },
             el('a', { class: 'card__link', href: ad.url },
@@ -677,9 +821,9 @@
                         el('div', { class: 'sk sk-line', style: { width: '40%' } })))));
     }
 
-    function emptyState({ emoji = '🔍', title, text, action = null }) {
+    function emptyState({ icon: iconName = 'search', title, text, action = null }) {
         return el('div', { class: 'empty' },
-            el('div', { class: 'empty__icon' }, emoji),
+            el('div', { class: 'empty__icon' }, icon(iconName)),
             el('h3', {}, title),
             el('p', {}, text),
             action);
@@ -748,6 +892,15 @@
 
         const syncUrl = (p) => history.replaceState(null, '', location.pathname + qs(p));
 
+        // Город по умолчанию — тот, что выбран в шапке (если в адресе город не задан и это не лента одного продавца)
+        const defaultCity = () => (APP.city && APP.city !== 'all' ? APP.city : '');
+        const setFilterCity = (c) => {
+            const sel = form.elements.city;
+            if (c && ![...sel.options].some((o) => o.value === c)) sel.append(el('option', { value: c }, c));
+            sel.value = c;
+        };
+        if (!new URLSearchParams(location.search).has('city') && !form.elements.user.value) setFilterCity(defaultCity());
+
         const syncChips = () => {
             const cat = form.elements.category.value;
             $$('#catBar .cat-chip').forEach((chip) => chip.classList.toggle('is-active', chip.dataset.category === cat));
@@ -762,7 +915,10 @@
         function renderHead(p, total) {
             const title = p.q ? `Результаты по запросу «${p.q}»` : (p.category ? categoryNames[p.category] || 'Объявления' : 'Объявления');
             $('#resultsTitle').textContent = title;
-            $('#resultsCount').textContent = total === 0 ? 'Ничего не найдено' : `Найдено ${total} ${plural(total, 'объявление', 'объявления', 'объявлений')}`;
+            const count = total === 0 ? 'Ничего не найдено' : `Найдено ${total} ${plural(total, 'объявление', 'объявления', 'объявлений')}`;
+            $('#resultsCount').replaceChildren(count, ...(p.city
+                ? [` · ${p.city} `, el('button', { type: 'button', class: 'link-btn', onClick: () => setCity('all') }, 'Показать все города')]
+                : []));
         }
 
         async function load({ append = false } = {}) {
@@ -789,7 +945,7 @@
 
                 if (data.total === 0) {
                     grid.append(emptyState({
-                        emoji: '🔍',
+                        icon: 'search',
                         title: 'По вашему запросу ничего не найдено',
                         text: 'Попробуйте изменить запрос или сбросить фильтры.',
                         action: el('button', { class: 'btn btn--primary', type: 'button', onClick: reset }, 'Сбросить фильтры'),
@@ -801,7 +957,7 @@
                 if (token !== state.token) return;
                 if (append) state.page -= 1;
                 else grid.replaceChildren(emptyState({
-                    emoji: '😵', title: 'Не удалось загрузить объявления', text: err.message,
+                    icon: 'alert-circle', title: 'Не удалось загрузить объявления', text: err.message,
                     action: el('button', { class: 'btn btn--primary', type: 'button', onClick: () => load() }, 'Повторить'),
                 }));
                 toast(err.message, 'error');
@@ -812,7 +968,7 @@
 
         function reset() {
             form.reset();
-            form.elements.city.value = '';
+            setFilterCity(defaultCity());
             form.elements.category.value = '0';
             form.elements.price_min.value = '';
             form.elements.price_max.value = '';
@@ -829,6 +985,9 @@
         form.addEventListener('submit', (e) => { e.preventDefault(); setSheet(false); load(); });
         $('#filtersReset').addEventListener('click', reset);
         form.elements.category.addEventListener('change', () => { renderAttrFilters(form.elements.category.value); syncChips(); });
+        // выбор города в фильтре — то же, что выбор в шапке
+        form.elements.city.addEventListener('change', () => { setCity(form.elements.city.value || 'all', { silent: true }).catch(() => {}); });
+        document.addEventListener('city:changed', () => { setFilterCity(defaultCity()); load(); });
 
         // поиск: живой (debounce 300 мс) и по Enter
         const liveSearch = debounce(() => load(), 300);
@@ -940,8 +1099,10 @@
         const next = $('.gallery__nav--next');
         let current = 0;
 
+        const imageSlides = slides.filter((sl) => $('img', sl));          // лайтбокс листает только фото; видеослайд (последний) открывается на месте
         const update = (i) => {
             current = i;
+            slides.forEach((sl, n) => { const v = $('video', sl); if (v && n !== i) v.pause(); });
             thumbs.forEach((t, n) => t.classList.toggle('is-active', n === i));
             if (counter) counter.textContent = `${i + 1} / ${slides.length}`;
             if (prev) prev.disabled = i === 0;
@@ -970,7 +1131,7 @@
         prev?.addEventListener('click', () => go(current - 1));
         next?.addEventListener('click', () => go(current + 1));
         thumbs.forEach((t, i) => t.addEventListener('click', () => go(i)));
-        slides.forEach((s, i) => s.addEventListener('click', () => openLightbox(i)));
+        slides.forEach((sl, i) => { if ($('img', sl)) sl.addEventListener('click', () => openLightbox(imageSlides.indexOf(sl))); });
         update(0);
 
         function openLightbox(start) {
@@ -1030,20 +1191,53 @@
                 if (data.password && data.password.length < 6) errors.password = 'Пароль: минимум 6 символов';
                 if (data.password !== data.password2) errors.password2 = 'Пароли не совпадают';
             }
+            if (!data.consent) errors.consent = 'Нужно принять политику и соглашение';
             if (Object.keys(errors).length) { showErrors(form, errors); return; }
 
             setLoading(submit, true);
             try {
                 const res = await apiPost('auth', action, data);
+                rememberConsent();
                 APP.csrf = res.csrf || APP.csrf;
                 toast(action === 'login' ? 'С возвращением!' : 'Аккаунт создан — добро пожаловать!');
                 const next = safeNext(new URLSearchParams(location.search).get('next'), res.user.role === 'admin' && action === 'login' ? '/admin.php' : '/index.php');
                 setTimeout(() => (location.href = next), 500);
             } catch (err) {
                 setLoading(submit, false);
+                if (err instanceof ApiError && err.status === 403) { showBan(err.message); return; }   // блокировка аккаунта или IP
                 if (!(err instanceof ApiError && showErrors(form, err.errors))) handleApiError(err);
             }
         });
+        initConsent(form);
+    }
+
+    /** Плашка с причиной блокировки на страницах входа и регистрации. */
+    function showBan(message) {
+        const box = $('#banBox');
+        if (!box) return toast(message, 'error', 6000);
+        $('p', box).textContent = message;
+        box.hidden = false;
+        box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+
+    /** Согласие с политикой: запоминается на устройстве до смены версии документов; кнопки Яндекса и Google требуют галочку. */
+    function rememberConsent() {
+        try { localStorage.setItem('consent', APP.legal.version); } catch { /* приватный режим */ }
+    }
+
+    function initConsent(form) {
+        const box = form.elements.consent;
+        if (!box) return;
+        try { box.checked = localStorage.getItem('consent') === APP.legal.version; } catch { /* приватный режим */ }
+        $$('.btn--oauth').forEach((link) => link.addEventListener('click', (e) => {
+            if (!box.checked) {
+                e.preventDefault();
+                showErrors(form, { consent: 'Сначала примите политику и соглашение' });
+                return;
+            }
+            rememberConsent();
+            link.href = link.href + (link.href.includes('?') ? '&' : '?') + 'consent=1';
+        }));
     }
 
     function initLogin() {
@@ -1084,14 +1278,34 @@
         form.elements.title.value = initial.title;
         form.elements.category_id.value = initial.category_id || '';
         form.elements.price.value = initial.price !== '' ? formatPrice(initial.price) : '';
-        form.elements.city.value = initial.city;
+        form.elements.city.value = initial.city || initial.default_city || (APP.city && APP.city !== 'all' ? APP.city : '');
         form.elements.description.value = initial.description;
+        form.elements.contact_method.value = initial.contact_method || 'any';
+        form.elements.contact_hours.value = initial.contact_hours || '';
+        if (!initial.has_phone) {
+            const phoneOnly = $('input[name="contact_method"][value="phone"]', form);
+            phoneOnly.disabled = true;
+            phoneOnly.closest('.choice').classList.add('is-disabled');
+            $('.contact-method .choice-grid', form).after(el('p', { class: 'field__hint' }, 'Чтобы принимать звонки, ', el('a', { href: '/profile.php', target: '_blank', rel: 'noopener' }, 'укажите телефон в профиле'), '.'));
+        }
 
         // --- подсказки городов
         const cityInput = form.elements.city;
         let known = [];
         try { known = JSON.parse(cityInput.dataset.knownCities || '[]'); } catch { /* нет подсказок из БД */ }
         attachCityAutocomplete(cityInput, known);
+        // «Определить автоматически» — браузер спросит разрешение на геопозицию
+        const geoBtn = el('button', { type: 'button', class: 'link-btn field__geo' }, icon('crosshair'), 'Определить автоматически');
+        geoBtn.addEventListener('click', async () => {
+            setLoading(geoBtn, true);
+            try {
+                const city = await detectCity();
+                cityInput.value = city;
+                cityInput.dispatchEvent(new Event('input', { bubbles: true }));
+                $('.suggest__list', cityInput.closest('.field'))?.setAttribute('hidden', '');
+            } catch (err) { toast(err.message, 'warning', 5000); } finally { setLoading(geoBtn, false); }
+        });
+        cityInput.closest('.field').insertBefore(geoBtn, $('.field__error', cityInput.closest('.field')));
 
         // --- характеристики зависят от категории
         let categories = [];
@@ -1208,6 +1422,93 @@
         dropzone.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
         renderPreviews();
 
+        // --- видеообзор: загрузка с прогрессом, предпросмотр, удаление (последний пункт формы)
+        const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+        const MAX_VIDEO_SECONDS = 180;
+        const videoDrop = $('#videoDrop');
+        const videoInput = $('#videoInput');
+        const videoPreview = $('#videoPreview');
+        /** {filename, url, name, status: 'uploading'|'ready', progress, existing} или null */
+        let video = initial.video ? { filename: initial.video.filename, url: initial.video.url, name: 'Видео загружено', status: 'ready', progress: 100, existing: true } : null;
+
+        function renderVideo() {
+            videoDrop.hidden = Boolean(video);
+            videoPreview.hidden = !video;
+            if (!video) { videoPreview.replaceChildren(); return; }
+            const remove = el('button', { type: 'button', class: 'btn btn--outline btn--sm btn--danger-text', onClick: removeVideo }, icon('trash'), 'Убрать');
+            if (video.status === 'uploading') {
+                videoPreview.replaceChildren(el('div', { class: 'video-preview__bar' },
+                    el('span', { class: 'video-preview__name' }, icon('video'), video.name),
+                    el('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': video.progress }, el('div', { class: 'progress__fill', style: { width: `${video.progress}%` } })),
+                    el('span', { class: 'muted' }, `${video.progress}%`), remove));
+            } else {
+                videoPreview.replaceChildren(
+                    el('video', { src: video.url, controls: true, preload: 'metadata', playsinline: true }),
+                    el('div', { class: 'video-preview__bar' }, el('span', { class: 'video-preview__name' }, icon('check-circle'), video.name), remove));
+            }
+        }
+
+        function removeVideo() {
+            if (video && video.xhr) video.xhr.abort();
+            if (video && !video.existing && video.filename) api('/api/upload.php?action=delete', { method: 'POST', data: { filename: video.filename } }).catch(() => {});
+            video = null;
+            videoInput.value = '';
+            renderVideo();
+        }
+
+        const videoError = (message) => showErrors(form, { video: message });
+
+        async function addVideo(file) {
+            if (!file) return;
+            clearErrors(form);
+            if (!/^video\/(mp4|webm|quicktime)$/.test(file.type) && !/\.(mp4|mov|webm)$/i.test(file.name)) return videoError('Допустимы видео MP4, MOV или WebM');
+            if (file.size > MAX_VIDEO_BYTES) return videoError('Видео слишком большое: максимум 50 МБ');
+            // длительность проверяем в браузере до загрузки (сервер тоже проверяет MP4/MOV)
+            const duration = await new Promise((resolve) => {
+                const probe = document.createElement('video');
+                probe.preload = 'metadata';
+                probe.onloadedmetadata = () => { resolve(probe.duration); URL.revokeObjectURL(probe.src); };
+                probe.onerror = () => resolve(0);
+                probe.src = URL.createObjectURL(file);
+            });
+            if (duration > MAX_VIDEO_SECONDS) return videoError('Видео длиннее 3 минут — сократите его');
+
+            if (video) removeVideo();
+            const mine = { name: file.name, status: 'uploading', progress: 0, existing: false };
+            video = mine;
+            renderVideo();
+            const xhr = new XMLHttpRequest();
+            mine.xhr = xhr;
+            xhr.open('POST', '/api/upload.php?action=video');
+            xhr.setRequestHeader('X-CSRF-Token', APP.csrf);
+            xhr.setRequestHeader('Accept', 'application/json');
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable && video === mine) { mine.progress = Math.round((e.loaded / e.total) * 100); renderVideo(); } };
+            xhr.onload = () => {
+                let res = null;
+                try { res = JSON.parse(xhr.responseText); } catch { /* ответ не JSON */ }
+                if (video !== mine) return;
+                if (xhr.status >= 200 && xhr.status < 300 && res && res.ok) {
+                    Object.assign(mine, { filename: res.filename, url: res.url, status: 'ready', progress: 100, xhr: null });
+                } else {
+                    video = null;
+                    videoError((res && res.error) || (xhr.status === 413 ? 'Видео слишком большое для сервера (максимум 50 МБ)' : `Не удалось загрузить видео (${xhr.status})`));
+                }
+                renderVideo();
+            };
+            xhr.onerror = () => { if (video === mine) { video = null; renderVideo(); videoError('Нет соединения с сервером. Проверьте интернет и повторите.'); } };
+            const fd = new FormData();
+            fd.append('file', file);
+            xhr.send(fd);
+        }
+
+        videoDrop.addEventListener('click', () => videoInput.click());
+        videoDrop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); videoInput.click(); } });
+        videoInput.addEventListener('change', () => addVideo(videoInput.files[0]));
+        ['dragenter', 'dragover'].forEach((t) => videoDrop.addEventListener(t, (e) => { e.preventDefault(); videoDrop.classList.add('is-over'); }));
+        ['dragleave', 'drop'].forEach((t) => videoDrop.addEventListener(t, (e) => { e.preventDefault(); videoDrop.classList.remove('is-over'); }));
+        videoDrop.addEventListener('drop', (e) => addVideo(e.dataTransfer.files[0]));
+        renderVideo();
+
         // --- отправка
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1220,6 +1521,8 @@
                 city: form.elements.city.value.trim(),
                 description: form.elements.description.value.trim(),
                 attributes: currentAttrValues(),
+                contact_method: form.elements.contact_method.value,
+                contact_hours: form.elements.contact_hours.value.trim(),
             };
 
             const errors = {};
@@ -1240,7 +1543,12 @@
                 return;
             }
 
+            if (video && video.status === 'uploading') {
+                toast('Дождитесь окончания загрузки видео', 'warning');
+                return;
+            }
             data.images = images.filter((i) => i.status === 'ready').map((i) => i.filename);
+            data.video = video && video.status === 'ready' ? video.filename : '';
             if (isEdit) data.id = initial.id;
 
             setLoading(submitBtn, true);
@@ -1257,7 +1565,7 @@
             toast(res.message, 'warning', 3500);
             $('#adFormCard').replaceChildren(
                 el('div', { class: 'success-panel' },
-                    el('div', { class: 'success-panel__icon' }, '🕒'),
+                    el('div', { class: 'success-panel__icon' }, icon('clock')),
                     el('span', { class: 'badge badge--pending' }, icon('clock'), 'На модерации'),
                     el('h2', {}, res.message),
                     el('p', {}, 'Модератор проверит объявление — после одобрения оно появится в ленте. Статус и комментарии модератора видны в разделе «Мои объявления».'),
@@ -1293,7 +1601,7 @@
 
                 if (!data.items.length) {
                     grid.replaceChildren(emptyState({
-                        emoji: status ? '📭' : '📝',
+                        icon: status ? 'inbox' : 'edit',
                         title: status ? 'В этом разделе пока пусто' : 'У вас пока нет объявлений',
                         text: status ? 'Попробуйте другой статус.' : 'Разместите первое объявление — это быстро и бесплатно.',
                         action: status ? null : el('a', { class: 'btn btn--primary btn--lg', href: '/create-ad.php' }, icon('plus'), 'Разместить объявление'),
@@ -1303,7 +1611,7 @@
                 grid.replaceChildren(...data.items.map((ad, i) => adCard(ad, { owner: true, index: i, onDelete: removeAd })));
             } catch (err) {
                 if (my !== token) return;
-                grid.replaceChildren(emptyState({ emoji: '😵', title: 'Не удалось загрузить', text: err.message }));
+                grid.replaceChildren(emptyState({ icon: 'alert-circle', title: 'Не удалось загрузить', text: err.message }));
                 handleApiError(err);
             }
         }
@@ -1339,7 +1647,7 @@
             $('#favCount').textContent = total ? `${total} ${plural(total, 'объявление', 'объявления', 'объявлений')}` : 'Пока пусто';
         };
         const empty = () => grid.replaceChildren(emptyState({
-            emoji: '💙', title: 'В избранном пока ничего нет',
+            icon: 'heart', title: 'В избранном пока ничего нет',
             text: 'Нажимайте на сердечко у объявлений, чтобы не потерять их.',
             action: el('a', { class: 'btn btn--primary btn--lg', href: '/index.php' }, 'Смотреть объявления'),
         }));
@@ -1402,7 +1710,7 @@
                 const data = await apiGet('listings', { action: 'list', user: sellerId, page: state.ads.page });
                 if (!append) grid.replaceChildren();
                 data.items.forEach((ad, i) => grid.append(adCard(ad, { index: i })));
-                if (!data.total) grid.replaceChildren(emptyState({ emoji: '📭', title: 'Пока нет объявлений', text: 'У этого продавца нет опубликованных объявлений.' }));
+                if (!data.total) grid.replaceChildren(emptyState({ icon: 'inbox', title: 'Пока нет объявлений', text: 'У этого продавца нет опубликованных объявлений.' }));
                 moreBox.hidden = !data.has_more;
             } catch (err) {
                 handleApiError(err);
@@ -1498,7 +1806,7 @@
                 $('.tab__count', tabs[1]).textContent = data.summary.count;
                 if (!append) { list.replaceChildren(); await renderReviewForm(); }
                 data.items.forEach((r) => list.append(reviewNode(r)));
-                if (!data.total) list.replaceChildren(emptyState({ emoji: '⭐', title: 'Отзывов пока нет', text: 'Будьте первым, кто оценит этого продавца.' }));
+                if (!data.total) list.replaceChildren(emptyState({ icon: 'star', title: 'Отзывов пока нет', text: 'Будьте первым, кто оценит этого продавца.' }));
                 revMoreBox.hidden = !data.has_more;
             } catch (err) { handleApiError(err); } finally { setLoading(revMore, false); }
         }
@@ -1513,6 +1821,7 @@
         const passForm = $('#passwordForm');
         liveClear(profileForm);
         if (passForm) liveClear(passForm);
+        if (profileForm.elements.city) attachCityAutocomplete(profileForm.elements.city, []);
 
         $$('[data-counter-for]').forEach((c) => {
             const input = profileForm.elements[c.dataset.counterFor];
@@ -1527,7 +1836,9 @@
             const btn = $('[type="submit"]', profileForm);
             setLoading(btn, true);
             try {
-                await apiPost('profile', 'update', Object.fromEntries(new FormData(profileForm)));
+                const data = Object.fromEntries(new FormData(profileForm));
+                await apiPost('profile', 'update', data);
+                if (data.city && data.city.trim()) { APP.city = data.city.trim(); paintCity(); }   // шапка показывает город из профиля
                 toast('Профиль сохранён');
             } catch (err) {
                 if (!(err instanceof ApiError && showErrors(profileForm, err.errors))) handleApiError(err);
@@ -1611,7 +1922,7 @@
             ]));
         } catch (err) {
             handleApiError(err);
-            tiles.replaceChildren(emptyState({ emoji: '😵', title: 'Не удалось загрузить статистику', text: err.message }));
+            tiles.replaceChildren(emptyState({ icon: 'alert-circle', title: 'Не удалось загрузить статистику', text: err.message }));
         }
     }
 
@@ -1638,6 +1949,7 @@
         ApiError, api, apiGet, apiPost, handleApiError,
         toast, setLoading, withLoading, clearErrors, showErrors, liveClear, field, openModal, confirmDialog, askReason,
         adCard, skeletonCards, emptyState, barChart, favBtn, realtime, attachCityAutocomplete, pages, applyTheme,
+        setCity, detectCity, openCityPicker, loadCities,
     };
 
     document.addEventListener('DOMContentLoaded', () => {

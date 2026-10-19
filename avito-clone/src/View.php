@@ -18,18 +18,22 @@ final class View
     public static function header(array $o = []): void
     {
         $o += [
-            'title'       => APP_NAME,
+            'title'       => Settings::siteName(),
             'page'        => '',
             'categories'  => true,     // показывать полосу категорий под шапкой
             'category'    => 0,        // id активной категории
             'description' => 'Доска объявлений: покупайте и продавайте рядом с вами',
             'bodyClass'   => '',
+            'image'       => '',       // картинка для превью ссылки (Open Graph); по умолчанию — логотип
+            'noindex'     => false,    // закрыть страницу от поисковиков
         ];
         self::$opts = $o;
         $user = Auth::user();
         $unread = $user ? Chat::unreadTotal((int) $user['id']) : 0;
         $client = self::clientData($user, $unread);
         $cats = $o['categories'] ? self::categories() : [];
+        $site = Settings::siteName();
+        $city = Geo::current($user);
         require BASE_PATH . '/templates/header.php';
     }
 
@@ -41,6 +45,8 @@ final class View
             'user'   => User::forClient($user),
             'unread' => $unread,
             'ws'     => ['url' => Realtime::publicUrl(), 'port' => Realtime::publicPort()],
+            'legal'  => ['version' => Legal::consentVersion()],
+            'city'   => Geo::current($user),                // null — ещё не выбирал, 'all' — все города
             'flash'  => self::pullFlash(),
         ];
     }
@@ -89,7 +95,7 @@ final class View
         http_response_code(404);
         self::header(['title' => 'Страница не найдена', 'page' => 'error']);
         echo '<main class="container"><div class="empty empty--page">',
-            '<div class="empty__icon">🔍</div><h1>Ничего не найдено</h1><p>', e($message), '</p>',
+            '<div class="empty__icon">', self::icon('search'), '</div><h1>Ничего не найдено</h1><p>', e($message), '</p>',
             '<a class="btn btn--primary btn--lg" href="/index.php">На главную</a></div></main>';
         self::footer();
         exit;
@@ -112,6 +118,32 @@ final class View
     public static function icon(string $name, string $class = ''): string
     {
         return '<svg class="icon' . ($class !== '' ? ' ' . e($class) : '') . '" aria-hidden="true"><use href="#i-' . e($name) . '"/></svg>';
+    }
+
+    /** Логотип: знак + название сайта из настроек (первое слово жирным, остальное — акцентным цветом). */
+    public static function logo(string $class = ''): string
+    {
+        $name = Settings::siteName();
+        $split = preg_match('/^(.+?)([\s\-].*)$/u', $name, $m) ? [$m[1], $m[2]] : [$name, ''];
+        return '<a class="logo' . ($class !== '' ? ' ' . e($class) : '') . '" href="/index.php" aria-label="' . e($name) . ' — на главную">'
+            . '<img class="logo__mark" src="/assets/img/logo-mark.svg" width="36" height="36" alt="">'
+            . '<span class="logo__text">' . e($split[0]) . ($split[1] !== '' ? '<b>' . e($split[1]) . '</b>' : '') . '</span></a>';
+    }
+
+    /** Имя иконки спрайта для категории (по названию): вместо эмодзи показываем строгие линейные значки. */
+    public static function categoryIcon(string $name): string
+    {
+        return Category::iconKey($name);
+    }
+
+    /** Галочка согласия с политикой и соглашением для форм входа и регистрации. */
+    public static function consentField(): string
+    {
+        return '<div class="field field--consent"><label class="checkbox consent">'
+            . '<input class="check" type="checkbox" id="consent" name="consent" value="1">'
+            . '<span>Я прочитал(а) и принимаю <a href="/privacy.php" target="_blank" rel="noopener">Политику обработки персональных данных</a>'
+            . ' и <a href="/terms.php" target="_blank" rel="noopener">Пользовательское соглашение</a></span></label>'
+            . '<p class="field__error" data-error-for="consent"></p></div>';
     }
 
     /** Фирменный значок провайдера входа: цветная «G» Google или красная «Я» Яндекса. */

@@ -31,6 +31,11 @@ $form = [
     'price'       => $edit ? (string) $edit['price'] : '',
     'city'        => $edit['city'] ?? '',
     'description' => $edit['description'] ?? '',
+    'contact_method' => $edit['contact_method'] ?? 'any',
+    'contact_hours'  => $edit['contact_hours'] ?? '',
+    'video'       => !empty($edit['video']) ? ['filename' => $edit['video'], 'url' => $edit['video_url']] : null,
+    'has_phone'   => !empty($user['phone']),
+    'default_city' => $user['city'] ?? '',
     'attributes'  => $edit['attributes'] ?? new stdClass(),
     'images'      => array_map(static fn(array $i) => ['filename' => $i['filename'], 'url' => $i['thumb']], $edit['images'] ?? []),
 ];
@@ -66,7 +71,7 @@ View::header([
                     <select class="select" id="category_id" name="category_id" required>
                         <option value="">Выберите категорию</option>
                         <?php foreach ($categories as $c): ?>
-                            <option value="<?= $c['id'] ?>"><?= e($c['icon'] . ' ' . $c['name']) ?></option>
+                            <option value="<?= $c['id'] ?>"><?= e($c['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <p class="field__error" data-error-for="category_id"></p>
@@ -101,6 +106,24 @@ View::header([
                 <div class="field__meta"><p class="field__error" data-error-for="description"></p><span class="counter" data-counter-for="description"></span></div>
             </div>
 
+            <fieldset class="field contact-method">
+                <legend class="field__label">Предпочтительный способ связи</legend>
+                <div class="choice-grid">
+                    <label class="choice"><input type="radio" name="contact_method" value="any" checked>
+                        <span class="choice__body"><?= View::icon('phone') ?><span><b>Звонок и сообщения</b><small>Покупатель выберет сам</small></span></span></label>
+                    <label class="choice"><input type="radio" name="contact_method" value="chat">
+                        <span class="choice__body"><?= View::icon('message') ?><span><b>Только сообщения</b><small>Чат на сайте, телефон скрыт</small></span></span></label>
+                    <label class="choice"><input type="radio" name="contact_method" value="phone">
+                        <span class="choice__body"><?= View::icon('phone') ?><span><b>Только звонок</b><small>Чат для этого объявления выключен</small></span></span></label>
+                </div>
+                <p class="field__error" data-error-for="contact_method"></p>
+                <div class="field contact-hours">
+                    <label class="field__label" for="contact_hours">Удобное время для связи <span class="muted">(необязательно)</span></label>
+                    <input class="input" id="contact_hours" name="contact_hours" type="text" maxlength="60" placeholder="Например, с 9 до 21 по Москве">
+                    <p class="field__error" data-error-for="contact_hours"></p>
+                </div>
+            </fieldset>
+
             <div class="field">
                 <span class="field__label">Фотографии <span class="muted">(до <?= Ad::MAX_IMAGES ?>, первое — главное)</span></span>
                 <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Загрузить фото">
@@ -111,6 +134,19 @@ View::header([
                 </div>
                 <div class="previews" id="previews"></div>
                 <p class="field__error" data-error-for="images"></p>
+            </div>
+
+            <!-- Видеообзор — самый последний пункт формы, после фотографий -->
+            <div class="field video-field" id="videoField">
+                <span class="field__label">Видеообзор <span class="muted">(необязательно)</span></span>
+                <div class="video-drop" id="videoDrop" tabindex="0" role="button" aria-label="Загрузить видеообзор">
+                    <?= View::icon('video', 'dropzone__icon') ?>
+                    <strong>Добавьте видео товара</strong>
+                    <span>MP4, MOV или WebM · до 50 МБ · до 3 минут</span>
+                    <input type="file" id="videoInput" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden>
+                </div>
+                <div class="video-preview" id="videoPreview" hidden></div>
+                <p class="field__error" data-error-for="video"></p>
             </div>
 
             <div class="form-actions">

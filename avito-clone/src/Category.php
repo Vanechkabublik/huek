@@ -27,9 +27,28 @@ final class Category
             'id'           => (int) $r['id'],
             'name'         => $r['name'],
             'icon'         => $r['icon'],
+            'icon_key'     => self::iconKey($r['name']),
             'total_ads'    => (int) $r['total_ads'],
             'approved_ads' => (int) $r['approved_ads'],
         ], $rows);
+    }
+
+    /** Имя линейной иконки из спрайта по названию категории (вместо эмодзи в интерфейсе). */
+    public static function iconKey(string $name): string
+    {
+        $n = mb_strtolower($name);
+        return match (true) {
+            str_contains($n, 'транспорт'), str_contains($n, 'авто')                             => 'car',
+            str_contains($n, 'недвиж')                                                          => 'building',
+            str_contains($n, 'электрон'), str_contains($n, 'техник')                            => 'smartphone',
+            str_contains($n, 'одежд'), str_contains($n, 'обув')                                 => 'shirt',
+            str_contains($n, 'работ'), str_contains($n, 'вакан')                                => 'briefcase',
+            str_contains($n, 'услуг')                                                           => 'wrench',
+            str_contains($n, 'животн')                                                          => 'paw',
+            str_contains($n, 'дом'), str_contains($n, 'мебел'), str_contains($n, 'сад')         => 'sofa',
+            str_contains($n, 'спорт'), str_contains($n, 'хобби'), str_contains($n, 'отдых')     => 'dumbbell',
+            default                                                                             => 'package',
+        };
     }
 
     public static function find(int $id): ?array
@@ -46,10 +65,12 @@ final class Category
 
     public static function update(int $id, string $name, string $icon): void
     {
-        if (self::find($id) === null) {
+        $cur = self::find($id);
+        if ($cur === null) {
             throw new HttpException('Категория не найдена', 404);
         }
-        [$name, $icon] = self::validate($name, $icon);
+        // Иконка в интерфейсе подбирается по названию; поле icon (эмодзи) оставлено для совместимости и не меняется без явного значения
+        [$name, $icon] = self::validate($name, trim($icon) !== '' ? $icon : (string) $cur['icon']);
         self::assertUnique($name, $id);
         Database::run('UPDATE categories SET name = ?, icon = ? WHERE id = ?', [$name, $icon, $id]);
     }

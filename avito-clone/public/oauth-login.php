@@ -24,8 +24,8 @@ try {
     } elseif (Auth::check()) {
         Response::redirect($next);
     }
-    Response::redirect(OAuth::start($provider, $next, $link));
+    Response::redirect(OAuth::start($provider, $next, $link, ($_GET['consent'] ?? '') === '1'));
 } catch (HttpException $e) {
-    $_SESSION['flash_error'] = $e->getMessage();
+    $_SESSION[$e->getCode() === 403 ? 'flash_ban' : 'flash_error'] = $e->getMessage();
     Response::redirect($link ? '/profile.php' : '/login.php');
 }

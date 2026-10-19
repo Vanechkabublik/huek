@@ -9,7 +9,8 @@ namespace App;
 final class User
 {
     /** Колонки без password_hash — их безопасно отдавать в шаблоны. */
-    private const SAFE_COLUMNS = 'id, email, name, phone, role, is_blocked, created_at, avatar_url, about, last_login_at,
+    private const SAFE_COLUMNS = 'id, email, name, phone, role, is_blocked, ban_reason, banned_at, banned_until, created_at, avatar_url, about,
+                                  city, last_login_at, last_ip, last_ua, signup_ip, signup_ua, consent_at, consent_version,
                                   (password_hash IS NOT NULL) AS has_password';
 
     /** @return array<string,mixed>|null */
@@ -107,9 +108,19 @@ final class User
         Database::run('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($password, PASSWORD_DEFAULT), $id]);
     }
 
+    /** Запоминает вход: время, реальный IP и браузер (для безопасности и аналитики). */
     public static function touchLogin(int $id): void
     {
-        Database::run('UPDATE users SET last_login_at = NOW() WHERE id = ?', [$id]);
+        Database::run('UPDATE users SET last_login_at = NOW(), last_ip = ?, last_ua = ? WHERE id = ?', [Client::ip(), Client::userAgent(), $id]);
+    }
+
+    /** IP и браузер в момент регистрации. */
+    public static function recordSignup(int $id): void
+    {
+        Database::run(
+            'UPDATE users SET signup_ip = ?, signup_ua = ?, last_ip = ?, last_ua = ? WHERE id = ?',
+            [Client::ip(), Client::userAgent(), Client::ip(), Client::userAgent(), $id]
+        );
     }
 
     public static function linkIdentity(int $userId, string $provider, string $externalId, ?string $email = null): void
@@ -159,6 +170,10 @@ final class User
             $v->email('email');
         }
         $errors = $v->errors();
+        $city = trim((string) ($in['city'] ?? ''));
+        if ($city !== '' && Geo::cleanName($city) === null) {
+            $errors['city'] = 'Некорректное название города';
+        }
         $email = mb_strtolower($v->value('email'));
         if (!isset($errors['email']) && $email !== '' && self::emailExists($email, $id)) {
             $errors['email'] = 'Этот email уже занят';
@@ -170,15 +185,19 @@ final class User
         // Email можно задать, если его не было (вход через Google/Яндекс), и сменить; стереть поле — значит оставить прежний
         $newEmail = $email !== '' ? $email : ($cur['email'] ?? null);
         Database::run(
-            'UPDATE users SET name = ?, phone = ?, about = ?, email = ? WHERE id = ?',
+            'UPDATE users SET name = ?, phone = ?, about = ?, email = ?, city = ? WHERE id = ?',
             [
                 $v->value('name'),
                 $v->value('phone') !== '' ? Format::phone($v->value('phone')) : null,
                 $v->value('about') !== '' ? $v->value('about') : null,
                 $newEmail,
+                $city !== '' ? Geo::cleanName($city) : null,
                 $id,
             ]
         );
+        if ($city !== '') {
+            Geo::remember($city, null);                 // выбранный в профиле город становится городом по умолчанию в ленте
+        }
     }
 
     public static function setAvatar(int $id, ?string $url): ?string

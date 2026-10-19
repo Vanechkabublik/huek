@@ -64,7 +64,8 @@ View::header([
         <h1 class="ad-title"><?= e($ad['title']) ?></h1>
 
         <!-- Галерея: горизонтальный scroll-snap — на телефоне это свайп-карусель -->
-        <div class="gallery" id="gallery" data-count="<?= count($images) ?>">
+        <?php $video = $ad['video_url'] ?? null; $slideCount = count($images) + ($video ? 1 : 0); ?>
+        <div class="gallery" id="gallery" data-count="<?= $slideCount ?>">
             <?php if ($images): ?>
                 <div class="gallery__main">
                     <div class="gallery__track" id="galleryTrack">
@@ -74,20 +75,30 @@ View::header([
                                      <?= $i > 0 ? 'loading="lazy"' : '' ?> draggable="false">
                             </div>
                         <?php endforeach; ?>
+                        <?php if ($video): /* видеообзор — последний слайд, после всех фото */ ?>
+                            <div class="gallery__slide gallery__slide--video">
+                                <video controls preload="metadata" playsinline poster="<?= e($images[0]['thumb']) ?>" src="<?= e($video) ?>">Ваш браузер не воспроизводит это видео.</video>
+                            </div>
+                        <?php endif; ?>
                     </div>
-                    <?php if (count($images) > 1): ?>
-                        <button class="gallery__nav gallery__nav--prev" type="button" aria-label="Предыдущее фото"><?= View::icon('chevron-left') ?></button>
-                        <button class="gallery__nav gallery__nav--next" type="button" aria-label="Следующее фото"><?= View::icon('chevron-right') ?></button>
-                        <span class="gallery__counter" id="galleryCounter">1 / <?= count($images) ?></span>
+                    <?php if ($slideCount > 1): ?>
+                        <button class="gallery__nav gallery__nav--prev" type="button" aria-label="Предыдущий слайд"><?= View::icon('chevron-left') ?></button>
+                        <button class="gallery__nav gallery__nav--next" type="button" aria-label="Следующий слайд"><?= View::icon('chevron-right') ?></button>
+                        <span class="gallery__counter" id="galleryCounter">1 / <?= $slideCount ?></span>
                     <?php endif; ?>
                 </div>
-                <?php if (count($images) > 1): ?>
+                <?php if ($slideCount > 1): ?>
                     <div class="gallery__thumbs" id="galleryThumbs">
                         <?php foreach ($images as $i => $img): ?>
                             <button class="gallery__thumb<?= $i === 0 ? ' is-active' : '' ?>" type="button" data-index="<?= $i ?>" aria-label="Фото <?= $i + 1 ?>">
                                 <img src="<?= e($img['thumb']) ?>" alt="" loading="lazy">
                             </button>
                         <?php endforeach; ?>
+                        <?php if ($video): ?>
+                            <button class="gallery__thumb gallery__thumb--video" type="button" data-index="<?= count($images) ?>" aria-label="Видеообзор">
+                                <img src="<?= e($images[0]['thumb']) ?>" alt="" loading="lazy"><?= View::icon('play', 'gallery__play') ?>
+                            </button>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
             <?php else: ?>
@@ -114,14 +125,26 @@ View::header([
                         <button class="btn btn--outline btn--lg btn--block btn--danger-text" type="button" id="deleteAdBtn"><?= View::icon('trash') ?>Удалить</button>
                     </div>
                 <?php else: ?>
+                    <?php $method = $ad['contact_method'] ?? 'any'; ?>
                     <div class="buy-card__actions">
-                        <button class="btn btn--primary btn--lg btn--block" type="button" id="showPhoneBtn" data-ad="<?= $ad['id'] ?>">
-                            <?= View::icon('phone') ?><span>Показать телефон</span>
-                        </button>
-                        <a class="btn btn--yellow btn--lg btn--block" id="writeBtn" href="/chat.php?ad=<?= $ad['id'] ?>">
-                            <?= View::icon('message') ?>Написать сообщение
-                        </a>
+                        <?php if ($method !== 'chat'): ?>
+                            <button class="btn btn--primary btn--lg btn--block" type="button" id="showPhoneBtn" data-ad="<?= $ad['id'] ?>">
+                                <?= View::icon('phone') ?><span>Показать телефон</span>
+                            </button>
+                        <?php endif; ?>
+                        <?php if ($method !== 'phone'): ?>
+                            <a class="btn <?= $method === 'chat' ? 'btn--primary' : 'btn--yellow' ?> btn--lg btn--block" id="writeBtn" href="/chat.php?ad=<?= $ad['id'] ?>">
+                                <?= View::icon('message') ?>Написать сообщение
+                            </a>
+                        <?php endif; ?>
                     </div>
+                    <?php if ($method !== 'any' || !empty($ad['contact_hours'])): ?>
+                        <ul class="contact-note">
+                            <?php if ($method === 'chat'): ?><li><?= View::icon('message') ?>Автор отвечает в чате на сайте</li><?php endif; ?>
+                            <?php if ($method === 'phone'): ?><li><?= View::icon('phone') ?>Автор принимает только звонки</li><?php endif; ?>
+                            <?php if (!empty($ad['contact_hours'])): ?><li><?= View::icon('clock') ?>Удобное время: <?= e($ad['contact_hours']) ?></li><?php endif; ?>
+                        </ul>
+                    <?php endif; ?>
                 <?php endif; ?>
 
                 <?php if ($isAdmin && !$ad['is_owner']): ?>
@@ -149,7 +172,7 @@ View::header([
         <div class="ad-info">
             <ul class="facts">
                 <li><?= View::icon('map-pin') ?><span>Город</span><b><?= e($ad['city']) ?></b></li>
-                <li><?= View::icon('tag') ?><span>Категория</span><b><?= e($ad['category_icon'] . ' ' . $ad['category_name']) ?></b></li>
+                <li><?= View::icon('tag') ?><span>Категория</span><b><?= e($ad['category_name']) ?></b></li>
                 <li><?= View::icon('calendar') ?><span>Опубликовано</span><b><?= e($ad['date_text']) ?></b></li>
                 <li><?= View::icon('eye') ?><span>Просмотры</span><b><?= number_format($ad['views'], 0, '', "\u{00A0}") ?></b></li>
             </ul>

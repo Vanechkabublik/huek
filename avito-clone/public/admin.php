@@ -40,6 +40,8 @@ $client = View::clientData($admin);
             <a href="#/categories" data-section="categories"><?= View::icon('tag') ?>Категории</a>
             <a href="#/reviews" data-section="reviews"><?= View::icon('star') ?>Отзывы</a>
             <a href="#/audit" data-section="audit"><?= View::icon('file-text') ?>Журнал</a>
+            <a href="#/security" data-section="security"><?= View::icon('shield-check') ?>Безопасность</a>
+            <a href="#/legal" data-section="legal"><?= View::icon('file-text') ?>Документы</a>
             <a href="#/integrations" data-section="integrations"><?= View::icon('settings') ?>Интеграции</a>
         </nav>
         <div class="admin__foot">

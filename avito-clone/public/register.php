@@ -17,6 +17,8 @@ View::header(['title' => 'Регистрация', 'page' => 'register', 'catego
         <h1>Регистрация</h1>
         <p class="auth__sub">Это займёт меньше минуты</p>
 
+        <div class="alert alert--ban" id="banBox" role="alert" hidden><strong>Доступ ограничен</strong><p></p></div>
+
         <form id="registerForm" novalidate>
             <div class="field">
                 <label class="field__label" for="name">Имя</label>
@@ -44,6 +46,7 @@ View::header(['title' => 'Регистрация', 'page' => 'register', 'catego
                 <input class="input" id="password2" name="password2" type="password" autocomplete="new-password" placeholder="Ещё раз" required>
                 <p class="field__error" data-error-for="password2"></p>
             </div>
+            <?= View::consentField() ?>
             <button class="btn btn--primary btn--lg btn--block" type="submit">Создать аккаунт</button>
         </form>
 

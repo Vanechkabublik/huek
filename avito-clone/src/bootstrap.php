@@ -9,7 +9,7 @@ declare(strict_types=1);
 define('BASE_PATH', dirname(__DIR__));
 define('UPLOAD_DIR', BASE_PATH . '/public/uploads');
 define('UPLOAD_URL', '/uploads');
-define('APP_NAME', 'Авито-клон');
+define('APP_NAME', 'Авито-клон');   // название по умолчанию; в интерфейсе берётся из настроек (App\Settings::siteName())
 define('APP_DEBUG', getenv('APP_DEBUG') === '1');
 
 // PSR-4-подобная автозагрузка: App\Ad → src/Ad.php
@@ -37,4 +37,6 @@ function e(?string $value): string
 // В консольных скриптах (bin/*.php) сессия не нужна
 if (PHP_SAPI !== 'cli') {
     \App\Auth::start();
+    \App\Ban::sweep();         // снимает истёкшие блокировки
+    \App\Ban::enforceSite();   // бан «весь сайт» по IP
 }

@@ -134,7 +134,7 @@ final class Chat
     public static function draftForAd(int $adId, int $userId): array
     {
         $ad = Database::one(
-            "SELECT a.id, a.user_id, a.title, a.price, a.status,
+            "SELECT a.id, a.user_id, a.title, a.price, a.status, a.contact_method,
                     (SELECT filename FROM ad_images WHERE ad_id = a.id ORDER BY id LIMIT 1) AS cover,
                     u.id AS peer_id, u.name AS peer_name, u.avatar_url AS peer_avatar
              FROM ads a JOIN users u ON u.id = a.user_id WHERE a.id = ?",
@@ -145,6 +145,9 @@ final class Chat
         }
         if ((int) $ad['user_id'] === $userId) {
             throw new HttpException('Это ваше объявление', 422);
+        }
+        if ($ad['contact_method'] === 'phone') {
+            throw new HttpException('Автор принимает только звонки — нажмите «Показать телефон» в объявлении', 403);
         }
         return [
             'id'     => null,
@@ -245,7 +248,7 @@ final class Chat
             if ($convId !== null) {
                 $conv = self::requireMember($convId, $userId);
             } else {
-                $ad = Database::one('SELECT id, user_id, status FROM ads WHERE id = ?', [(int) $adId]);
+                $ad = Database::one('SELECT id, user_id, status, contact_method FROM ads WHERE id = ?', [(int) $adId]);
                 if ($ad === null || $ad['status'] !== 'approved') {
                     throw new HttpException('Объявление недоступно для переписки', 404);
                 }
@@ -254,6 +257,9 @@ final class Chat
                 }
                 $existing = self::conversationIdForAd((int) $ad['id'], $userId);
                 if ($existing === null) {
+                    if ($ad['contact_method'] === 'phone') {
+                        throw new HttpException('Автор принимает только звонки', 403);
+                    }
                     $created = true;
                     $existing = Database::insert(
                         'INSERT INTO conversations (ad_id, buyer_id, seller_id) VALUES (?, ?, ?)',

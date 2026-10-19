@@ -120,11 +120,17 @@ final class OAuth
      * Ссылка на страницу авторизации у провайдера.
      * @param bool $link true — привязать аккаунт к уже вошедшему пользователю, а не входить
      */
-    public static function start(string $provider, string $next = '/index.php', bool $link = false): string
+    public static function start(string $provider, string $next = '/index.php', bool $link = false, bool $consent = false): string
     {
         $c = self::config($provider);
         if ($c === null || !self::enabled($provider)) {
             throw new HttpException('Вход через ' . self::name($provider) . ' не настроен', 404);
+        }
+        if (!$link) {
+            Ban::assertIpAllowed();
+            if (!$consent) {
+                throw new HttpException('Для входа нужно принять Политику обработки персональных данных и Пользовательское соглашение', 422);
+            }
         }
         $state    = bin2hex(random_bytes(16));
         $verifier = self::b64url(random_bytes(48));
@@ -134,6 +140,7 @@ final class OAuth
             'verifier' => $verifier,
             'next'     => $next,
             'link'     => $link,
+            'consent'  => $consent,
             'uid'      => $link ? Auth::id() : null,
             't'        => time(),
         ];
@@ -150,7 +157,7 @@ final class OAuth
     /**
      * Обрабатывает возврат от провайдера.
      * @param array<string,mixed> $query $_GET страницы /oauth-callback.php
-     * @return array{user_id:int,provider:string,linked:bool,created:bool,next:string}
+     * @return array{user_id:int,provider:string,linked:bool,created:bool,consent:bool,next:string}
      * @throws HttpException
      */
     public static function handleCallback(array $query): array
@@ -212,15 +219,15 @@ final class OAuth
                 throw new HttpException("Войдите в аккаунт, чтобы привязать $name", 401);
             }
             User::linkIdentity($me, $provider, $profile['id'], $profile['email']);
-            return ['user_id' => $me, 'provider' => $provider, 'linked' => true, 'created' => false, 'next' => '/profile.php'];
+            return ['user_id' => $me, 'provider' => $provider, 'linked' => true, 'created' => false, 'consent' => false, 'next' => '/profile.php'];
         }
 
+        Ban::assertIpAllowed();
+        $consent = !empty($ctx['consent']);
         $existing = User::findByIdentity($provider, $profile['id']);
         if ($existing !== null) {
-            if ((int) $existing['is_blocked'] === 1) {
-                throw new HttpException('Ваш аккаунт заблокирован администратором', 403);
-            }
-            return ['user_id' => (int) $existing['id'], 'provider' => $provider, 'linked' => false, 'created' => false, 'next' => $next];
+            Auth::assertNotBanned($existing, $provider);          // причина блокировки видна и при входе через соцсеть
+            return ['user_id' => (int) $existing['id'], 'provider' => $provider, 'linked' => false, 'created' => false, 'consent' => $consent, 'next' => $next];
         }
 
         if ($profile['email'] !== null && User::emailExists($profile['email'])) {
@@ -232,7 +239,7 @@ final class OAuth
 
         $avatar = $profile['avatar'] !== null ? Upload::storeAvatarFromUrl($profile['avatar']) : null;
         $id = User::createFromIdentity($provider, $profile['id'], $profile['name'], $profile['email'], $avatar);
-        return ['user_id' => $id, 'provider' => $provider, 'linked' => false, 'created' => true, 'next' => $next];
+        return ['user_id' => $id, 'provider' => $provider, 'linked' => false, 'created' => true, 'consent' => $consent, 'next' => $next];
     }
 
     /**

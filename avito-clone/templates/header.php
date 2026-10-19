@@ -1,50 +1,66 @@
 <?php
 /**
  * Шапка страницы. Переменные приходят из View::header():
- * $o (опции), $user, $unread, $client (данные для JS), $cats.
+ * $o (опции), $user, $unread, $client (данные для JS), $cats, $site (название сайта), $city (выбранный город).
  */
 use App\View;
 
 $isIndex = $o['page'] === 'index';
 $q = $isIndex ? (string) ($_GET['q'] ?? '') : '';
+$cityLabel = $city === null ? 'Выберите город' : ($city === 'all' ? 'Все города' : $city);
+$origin = App\OAuth::appUrl();
+$ogImage = $o['image'] !== '' ? $o['image'] : '/icon-512.png';
 ?>
 <!doctype html>
 <html lang="ru">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title><?= e($o['title']) ?> — <?= e(APP_NAME) ?></title>
+    <title><?= e($o['title']) ?><?= $o['title'] === $site ? '' : ' — ' . e($site) ?></title>
     <meta name="description" content="<?= e($o['description']) ?>">
-    <meta name="theme-color" content="#00aaff">
+    <meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0c1017" media="(prefers-color-scheme: dark)">
     <meta name="color-scheme" content="light dark">
     <meta name="csrf-token" content="<?= e($client['csrf']) ?>">
+<?php if ($o['noindex']): ?>
+    <meta name="robots" content="noindex, nofollow">
+<?php endif; ?>
+    <meta property="og:site_name" content="<?= e($site) ?>">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="<?= e($o['title']) ?>">
+    <meta property="og:description" content="<?= e($o['description']) ?>">
+    <meta property="og:image" content="<?= e(str_starts_with($ogImage, 'http') ? $ogImage : $origin . $ogImage) ?>">
+    <meta name="twitter:card" content="summary">
     <?= View::themeScript() ?>
 
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2300aaff'/%3E%3Ctext x='16' y='23' font-family='Arial' font-size='20' font-weight='700' text-anchor='middle' fill='white'%3E%D0%90%3C/text%3E%3Ccircle cx='26' cy='7' r='4' fill='%23ffc700'/%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap&amp;subset=cyrillic">
+    <link rel="icon" href="/favicon.ico" sizes="48x48">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="preload" href="/assets/fonts/montserrat-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/assets/fonts/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="<?= e(View::asset('/assets/css/style.css')) ?>">
 </head>
 <body class="<?= e($o['bodyClass']) ?>" data-page="<?= e($o['page']) ?>">
 <?php require BASE_PATH . '/templates/icons.php'; ?>
+<a class="skip-link" href="#main">Перейти к содержимому</a>
 
 <header class="header" id="header">
     <div class="container header__inner">
-        <a class="logo" href="/index.php" aria-label="<?= e(APP_NAME) ?> — на главную">
-            <span class="logo__mark">А<i></i></span>
-            <span class="logo__text">Авито<b>-клон</b></span>
-        </a>
+        <?= View::logo() ?>
+
+        <button class="city-btn" type="button" id="cityBtn" aria-haspopup="dialog" title="Выбрать город">
+            <?= View::icon('map-pin') ?><span class="city-btn__label" id="cityLabel"><?= e($cityLabel) ?></span><?= View::icon('chevron-down', 'city-btn__chev') ?>
+        </button>
 
         <form class="search" id="searchForm" action="/index.php" method="get" role="search">
             <?= View::icon('search', 'search__icon') ?>
             <input class="search__input" id="searchInput" type="search" name="q" value="<?= e($q) ?>"
-                   placeholder="Что ищете?" autocomplete="off" aria-label="Поиск объявлений" maxlength="100">
+                   placeholder="Поиск по объявлениям" autocomplete="off" aria-label="Поиск объявлений" maxlength="100">
             <button class="btn btn--primary search__btn" type="submit">Найти</button>
         </form>
 
         <nav class="header__actions" aria-label="Основная навигация">
-            <a class="header__link header__link--text" href="/my-ads.php">Мои объявления</a>
             <a class="icon-link header__fav" href="/favorites.php" title="Избранное" aria-label="Избранное"><?= View::icon('heart') ?></a>
             <a class="icon-link header__chat" href="/chat.php" title="Сообщения" aria-label="Сообщения">
                 <?= View::icon('message') ?><span class="dot-badge" id="chatBadge"<?= $unread > 0 ? '' : ' hidden' ?>><?= $unread > 9 ? '9+' : $unread ?></span>
@@ -92,12 +108,12 @@ $q = $isIndex ? (string) ($_GET['q'] ?? '') : '';
                 <nav class="cat-bar__scroll" id="catBar" aria-label="Категории">
                     <a class="cat-chip<?= $o['category'] === 0 && $isIndex && empty($_GET['category']) ? ' is-active' : '' ?>"
                        href="/index.php" data-category="0">
-                        <span class="cat-chip__icon">🔥</span><span>Все</span>
+                        <?= View::icon('grid', 'cat-chip__icon') ?><span>Все категории</span>
                     </a>
                     <?php foreach ($cats as $c): ?>
                         <a class="cat-chip<?= $o['category'] === $c['id'] ? ' is-active' : '' ?>"
                            href="/index.php?category=<?= $c['id'] ?>" data-category="<?= $c['id'] ?>">
-                            <span class="cat-chip__icon"><?= e($c['icon']) ?></span><span><?= e($c['name']) ?></span>
+                            <?= View::icon(View::categoryIcon($c['name']), 'cat-chip__icon') ?><span><?= e($c['name']) ?></span>
                         </a>
                     <?php endforeach; ?>
                 </nav>

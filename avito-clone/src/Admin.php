@@ -121,7 +121,7 @@ final class Admin
         return [
             'stats' => self::stats(),
             'days'  => $days,
-            'top_categories' => array_map(static fn(array $r) => ['name' => $r['name'], 'icon' => $r['icon'], 'count' => (int) $r['n']], $top),
+            'top_categories' => array_map(static fn(array $r) => ['name' => $r['name'], 'icon' => Category::iconKey($r['name']), 'count' => (int) $r['n']], $top),
             'queue' => array_map(static fn(array $r) => Ad::card($r, true), $queue),
             'audit' => Audit::list('', 1, null, null, 6)['items'],
         ];
@@ -157,7 +157,7 @@ final class Admin
         $limit  = self::PER_PAGE;
         $offset = (max(1, $page) - 1) * $limit;
         $rows = Database::all(
-            "SELECT u.id, u.email, u.name, u.phone, u.role, u.is_blocked, u.created_at, u.last_login_at, u.avatar_url,
+            "SELECT u.id, u.email, u.name, u.phone, u.role, u.is_blocked, u.created_at, u.last_login_at, u.avatar_url, u.last_ip, u.ban_reason,
                     (SELECT COUNT(*) FROM ads WHERE user_id = u.id) AS ads_count,
                     (SELECT string_agg(i.provider, ',' ORDER BY i.id) FROM user_identities i WHERE i.user_id = u.id) AS social
              FROM users u WHERE $w ORDER BY u.id DESC LIMIT $limit OFFSET $offset",
@@ -184,6 +184,8 @@ final class Admin
             'ads_count'  => (int) $r['ads_count'],
             'social'     => $r['social'] !== null ? explode(',', (string) $r['social']) : [],
             'avatar'     => $r['avatar_url'] ?: null,
+            'last_ip'    => $r['last_ip'],
+            'ban_reason' => $r['ban_reason'],
             'created_at' => Format::dateFull($r['created_at']),
             'last_login' => $r['last_login_at'] ? Format::date($r['last_login_at']) : 'не входил',
         ];
@@ -211,11 +213,30 @@ final class Admin
                 'about'      => $u['about'],
                 'role'       => $u['role'],
                 'is_blocked' => (bool) $u['is_blocked'],
+                'city'       => $u['city'],
                 'social'     => array_map(static fn(array $i) => ['code' => $i['provider'], 'name' => OAuth::name($i['provider']), 'email' => $i['email']], array_values(User::identities($id))),
                 'avatar'     => User::avatarUrl($u),
                 'created_at' => Format::dateFull($u['created_at']),
                 'last_login' => $u['last_login_at'] ? Format::dateFull($u['last_login_at']) : 'не входил',
             ],
+            'ban'       => [
+                'active'  => (bool) $u['is_blocked'],
+                'reason'  => $u['ban_reason'],
+                'at'      => $u['banned_at'] ? Format::dateFull($u['banned_at']) : null,
+                'until'   => $u['banned_until'] ? Format::dateFull($u['banned_until']) : null,
+                'by'      => Database::value('SELECT name FROM users WHERE id = (SELECT banned_by FROM users WHERE id = ?)', [$id]),
+            ],
+            'net'       => [
+                'signup_ip'   => $u['signup_ip'],
+                'last_ip'     => $u['last_ip'],
+                'signup_ua'   => $u['signup_ua'],
+                'last_ua'     => $u['last_ua'],
+                'last_device' => $u['last_ua'] ? Client::parseUa((string) $u['last_ua']) : null,
+                'last_ip_banned' => $u['last_ip'] ? Ban::matchIp((string) $u['last_ip']) !== null : false,
+                'same_ip_users'  => $u['last_ip'] ? (int) Database::value('SELECT COUNT(*) FROM users WHERE last_ip = ? AND id <> ?', [$u['last_ip'], $id]) : 0,
+            ],
+            'consent'   => ['at' => $u['consent_at'] ? Format::dateFull($u['consent_at']) : null, 'version' => $u['consent_version']],
+            'logins'    => Security::list('', '', $id, 1, 8)['items'],
             'ads'       => $counts + ['all' => array_sum($counts)],
             'favorites' => (int) Database::value('SELECT COUNT(*) FROM favorites WHERE user_id = ?', [$id]),
             'chats'     => (int) Database::value('SELECT COUNT(*) FROM conversations WHERE buyer_id = ? OR seller_id = ?', [$id, $id]),
@@ -238,11 +259,52 @@ final class Admin
         return $user;
     }
 
-    public static function setBlocked(int $userId, bool $blocked, array $actor): void
+    /**
+     * Блокирует пользователя с причиной (её увидит сам пользователь при входе любым способом) и сроком.
+     * @param string $duration forever | 1d | 7d | 30d | YYYY-MM-DD
+     * @return string[] IP-адреса, заблокированные вместе с аккаунтом
+     */
+    public static function banUser(int $userId, string $reason, string $duration, bool $alsoIps, array $actor): array
     {
         $u = self::targetUser($userId, $actor);
-        Database::run('UPDATE users SET is_blocked = ? WHERE id = ?', [(int) $blocked, $userId]);
-        Audit::log($actor, $blocked ? 'user.block' : 'user.unblock', 'user', $userId, ['name' => $u['name'], 'email' => $u['email']]);
+        if (mb_strlen(trim($reason)) < 3) {
+            throw new HttpException('Укажите причину блокировки — её увидит пользователь', 422, ['reason' => 'Укажите причину (не короче 3 символов)']);
+        }
+        $until = Ban::until($duration);
+        $ips = Ban::banUser($userId, $reason, $until, $actor, $alsoIps);
+        Audit::log($actor, 'user.block', 'user', $userId, [
+            'name' => $u['name'], 'email' => $u['email'], 'reason' => trim($reason), 'until' => $until ?? 'навсегда', 'ips' => implode(', ', $ips),
+        ]);
+        return $ips;
+    }
+
+    /** Снимает блокировку; с $liftIps заодно убирает баны по IP-адресам этого пользователя. */
+    public static function unbanUser(int $userId, bool $liftIps, array $actor): void
+    {
+        $u = self::targetUser($userId, $actor);
+        Ban::unbanUser($userId);
+        if ($liftIps) {
+            foreach (array_unique(array_filter([$u['last_ip'] ?? null, $u['signup_ip'] ?? null])) as $ip) {
+                Database::run('DELETE FROM ip_bans WHERE ip = ?', [$ip]);
+            }
+        }
+        Audit::log($actor, 'user.unblock', 'user', $userId, ['name' => $u['name'], 'email' => $u['email']]);
+    }
+
+    public static function addIpBan(string $ip, string $reason, string $scope, string $duration, array $actor): void
+    {
+        $until = Ban::until($duration);
+        Ban::addIp($ip, $reason, $scope, $until, $actor);
+        Audit::log($actor, 'ip.ban', null, null, ['ip' => trim($ip), 'reason' => trim($reason), 'scope' => $scope, 'until' => $until ?? 'навсегда']);
+    }
+
+    public static function removeIpBan(int $id, array $actor): void
+    {
+        $ip = Ban::removeIp($id);
+        if ($ip === null) {
+            throw new HttpException('Запись не найдена', 404);
+        }
+        Audit::log($actor, 'ip.unban', null, null, ['ip' => $ip]);
     }
 
     public static function changePassword(int $userId, string $password, array $actor): void
@@ -277,6 +339,12 @@ final class Admin
             'SELECT i.filename FROM ad_images i JOIN ads a ON a.id = i.ad_id WHERE a.user_id = ?',
             [$userId]
         ), 'filename');
+        foreach (Database::all("SELECT video FROM ads WHERE user_id = ? AND video IS NOT NULL", [$userId]) as $v) {
+            $files[] = $v['video'];
+        }
+        if (!empty($u['avatar_url'])) {
+            Upload::removeAvatarUrl($u['avatar_url']);
+        }
         Database::run('DELETE FROM users WHERE id = ?', [$userId]);   // всё связанное удаляется каскадом
         array_map([Upload::class, 'remove'], $files);
         Upload::removeAvatarUrl($u['avatar_url'] ?? null);

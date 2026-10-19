@@ -18,7 +18,7 @@ View::header(['title' => 'Сообщения', 'page' => 'chat', 'categories' =>
         </aside>
         <section class="chat__thread" id="chatThread" aria-label="Переписка">
             <div class="chat__empty" id="chatEmpty">
-                <div class="empty__icon">💬</div>
+                <div class="empty__icon"><?= View::icon('message') ?></div>
                 <h2>Выберите диалог</h2>
                 <p class="muted">Здесь появится переписка с покупателями и продавцами</p>
             </div>

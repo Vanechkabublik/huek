@@ -23,7 +23,7 @@ final class Ad
     public static function baseSelect(string $extraColumns = ''): string
     {
         return "SELECT a.id, a.user_id, a.category_id, a.title, a.price, a.city, a.status,
-                       a.rejection_reason, a.views, a.created_at, a.attributes $extraColumns,
+                       a.rejection_reason, a.views, a.created_at, a.attributes, a.contact_method, a.contact_hours, a.video $extraColumns,
                        c.name AS category_name, c.icon AS category_icon,
                        u.email AS user_email, u.name AS user_name, u.is_blocked AS user_blocked,
                        (SELECT filename FROM ad_images WHERE ad_id = a.id ORDER BY id LIMIT 1) AS cover,
@@ -132,7 +132,7 @@ final class Ad
             'city'          => $r['city'],
             'category_id'   => $r['category_id'] !== null ? (int) $r['category_id'] : null,
             'category_name' => $r['category_name'] ?? 'Без категории',
-            'category_icon' => $r['category_icon'] ?? '📦',
+            'category_icon' => Category::iconKey((string) ($r['category_name'] ?? '')),
             'status'        => $r['status'],
             'status_label'  => self::STATUS_LABELS[$r['status']] ?? $r['status'],
             'date_text'     => Format::date($r['created_at']),
@@ -140,6 +140,7 @@ final class Ad
             'is_hit'        => $views >= self::HIT_VIEWS,
             'cover'         => !empty($r['cover']) ? Upload::thumbUrl($r['cover']) : null,
             'images_count'  => (int) $r['images_count'],
+            'has_video'     => !empty($r['video']),
             'url'           => '/ad.php?id=' . (int) $r['id'],
             'specs'         => self::specs($r),
             'is_favorite'   => false,
@@ -204,6 +205,10 @@ final class Ad
         $ad = self::card($row, $isOwner || $isAdmin);
         $ad['description'] = $row['description'];
         $ad['user_id']     = (int) $row['user_id'];
+        $ad['contact_method'] = $row['contact_method'];
+        $ad['contact_hours']  = $row['contact_hours'];
+        $ad['video_url']      = !empty($row['video']) ? Upload::url($row['video']) : null;
+        $ad['video']          = $row['video'];
         $attrs = self::decodeAttributes($row['attributes']);
         $ad['attributes']      = $attrs;
         $ad['attribute_list']  = $row['category_id'] !== null ? Attribute::display((int) $row['category_id'], $attrs) : [];
@@ -223,14 +228,18 @@ final class Ad
     /** Телефон продавца — только для публично видимого объявления. */
     public static function sellerPhone(int $id): ?string
     {
-        $phone = Database::value(
-            "SELECT u.phone FROM ads a JOIN users u ON u.id = a.user_id
+        $row = Database::one(
+            "SELECT u.phone, a.contact_method FROM ads a JOIN users u ON u.id = a.user_id
              WHERE a.id = ? AND a.status = 'approved' AND u.is_blocked = 0",
             [$id]
         );
-        if ($phone === null) {
+        if ($row === null) {
             throw new HttpException('Объявление не найдено', 404);
         }
+        if ($row['contact_method'] === 'chat') {
+            throw new HttpException('Автор общается только в чате на сайте — напишите ему сообщение', 403);
+        }
+        $phone = $row['phone'];
         return $phone !== '' ? Format::phone($phone) : null;
     }
 
@@ -278,16 +287,17 @@ final class Ad
      */
     public static function create(int $userId, array $input): int
     {
-        $data = self::validate($input, []);
+        $data = self::validate($input, [], null, !empty(User::find($userId)['phone']));
 
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
             $adId = Database::insert(
-                "INSERT INTO ads (user_id, category_id, title, description, price, city, status, attributes)
-                 VALUES (?, ?, ?, ?, ?, ?, 'pending', ?::jsonb)",
+                "INSERT INTO ads (user_id, category_id, title, description, price, city, status, attributes, contact_method, contact_hours, video)
+                 VALUES (?, ?, ?, ?, ?, ?, 'pending', ?::jsonb, ?, ?, ?)",
                 [$userId, $data['category_id'], $data['title'], $data['description'], $data['price'], $data['city'],
-                 json_encode($data['attributes'], JSON_UNESCAPED_UNICODE | JSON_FORCE_OBJECT)]
+                 json_encode($data['attributes'], JSON_UNESCAPED_UNICODE | JSON_FORCE_OBJECT),
+                 $data['contact_method'], $data['contact_hours'], $data['video']]
             );
             foreach ($data['images'] as $filename) {
                 Database::run('INSERT INTO ad_images (ad_id, filename) VALUES (?, ?)', [$adId, $filename]);
@@ -298,7 +308,7 @@ final class Ad
             throw $e;
         }
 
-        array_map([Upload::class, 'release'], $data['images']);
+        array_map([Upload::class, 'release'], array_filter([...$data['images'], $data['video']]));
         return $adId;
     }
 
@@ -307,7 +317,7 @@ final class Ad
      */
     public static function update(int $id, int $userId, array $input): void
     {
-        $ad = Database::one('SELECT id, user_id, status FROM ads WHERE id = ?', [$id]);
+        $ad = Database::one('SELECT id, user_id, status, video FROM ads WHERE id = ?', [$id]);
         if ($ad === null || (int) $ad['user_id'] !== $userId) {
             throw new HttpException('Объявление не найдено', 404);
         }
@@ -316,17 +326,19 @@ final class Ad
         }
 
         $current = array_column(Database::all('SELECT filename FROM ad_images WHERE ad_id = ?', [$id]), 'filename');
-        $data = self::validate($input, $current);
+        $data = self::validate($input, $current, $ad['video'] ?: null, !empty(User::find($userId)['phone']));
 
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
             Database::run(
                 "UPDATE ads SET category_id = ?, title = ?, description = ?, price = ?, city = ?, attributes = ?::jsonb,
+                                contact_method = ?, contact_hours = ?, video = ?,
                                 status = 'pending', rejection_reason = NULL, updated_at = NOW()
                  WHERE id = ?",
                 [$data['category_id'], $data['title'], $data['description'], $data['price'], $data['city'],
-                 json_encode($data['attributes'], JSON_UNESCAPED_UNICODE | JSON_FORCE_OBJECT), $id]
+                 json_encode($data['attributes'], JSON_UNESCAPED_UNICODE | JSON_FORCE_OBJECT),
+                 $data['contact_method'], $data['contact_hours'], $data['video'], $id]
             );
             $removed = array_diff($current, $data['images']);
             $added   = array_diff($data['images'], $current);
@@ -344,12 +356,19 @@ final class Ad
 
         array_map([Upload::class, 'remove'], $removed);
         array_map([Upload::class, 'release'], $added);
+        // Видео заменили или убрали — старый файл удаляем; новое выпускаем из «ожидающих»
+        if (!empty($ad['video']) && $ad['video'] !== $data['video']) {
+            Upload::remove($ad['video']);
+        }
+        if ($data['video'] !== null) {
+            Upload::release($data['video']);
+        }
     }
 
     /** Удаление: владельцем или админом. Файлы фото удаляются с диска. */
     public static function delete(int $id, array $actor): void
     {
-        $ad = Database::one('SELECT id, user_id FROM ads WHERE id = ?', [$id]);
+        $ad = Database::one('SELECT id, user_id, video FROM ads WHERE id = ?', [$id]);
         if ($ad === null) {
             throw new HttpException('Объявление не найдено', 404);
         }
@@ -357,6 +376,9 @@ final class Ad
             throw new HttpException('Недостаточно прав', 403);
         }
         $files = array_column(Database::all('SELECT filename FROM ad_images WHERE ad_id = ?', [$id]), 'filename');
+        if (!empty($ad['video'])) {
+            $files[] = $ad['video'];
+        }
         Database::run('DELETE FROM ads WHERE id = ?', [$id]);    // ad_images и messages удалятся каскадом
         array_map([Upload::class, 'remove'], $files);
     }
@@ -366,9 +388,11 @@ final class Ad
     /**
      * Проверяет поля формы объявления.
      * @param string[] $attached файлы, уже привязанные к редактируемому объявлению
-     * @return array{title:string,description:string,price:int,city:string,category_id:int,attributes:array,images:string[]}
+     * @param ?string $currentVideo видеофайл, уже привязанный к редактируемому объявлению
+     * @param bool $hasPhone указан ли телефон в профиле автора (для способа связи «только звонок»)
+     * @return array{title:string,description:string,price:int,city:string,category_id:int,attributes:array,images:string[],contact_method:string,contact_hours:?string,video:?string}
      */
-    private static function validate(array $input, array $attached): array
+    private static function validate(array $input, array $attached, ?string $currentVideo = null, bool $hasPhone = true): array
     {
         // «1 500 000» и «1500000 ₽» → «1500000»
         $input['price'] = preg_replace('/[\s\x{00A0}₽]/u', '', (string) ($input['price'] ?? ''));
@@ -414,6 +438,28 @@ final class Ad
                 }
             }
         }
+
+        // Способ связи: звонок и чат / только чат / только звонок (для звонка в профиле должен быть телефон)
+        $method = (string) ($input['contact_method'] ?? 'any');
+        if (!in_array($method, ['any', 'chat', 'phone'], true)) {
+            $errors['contact_method'] = 'Выберите способ связи из списка';
+        } elseif ($method === 'phone' && !$hasPhone) {
+            $errors['contact_method'] = 'Чтобы принимать звонки, укажите телефон в профиле';
+        }
+        $hours = trim((string) ($input['contact_hours'] ?? ''));
+        if (mb_strlen($hours) > 60) {
+            $errors['contact_hours'] = 'Не длиннее 60 символов';
+        }
+
+        // Видеообзор (необязательно): только загруженный этим пользователем в сессии или уже привязанный к объявлению
+        $video = trim((string) ($input['video'] ?? ''));
+        if ($video !== '') {
+            $ok = Upload::isVideoName($video) && ($video === $currentVideo || Upload::isPending($video));
+            if (!$ok) {
+                $errors['video'] = 'Видео недоступно — загрузите его заново';
+            }
+        }
+
         if ($errors) {
             throw new HttpException('Проверьте правильность заполнения полей', 422, $errors);
         }
@@ -426,6 +472,9 @@ final class Ad
             'category_id' => (int) $v->value('category_id'),
             'attributes'  => $attributes,
             'images'      => $images,
+            'contact_method' => $method,
+            'contact_hours'  => $hours !== '' ? $hours : null,
+            'video'          => $video !== '' ? $video : null,
         ];
     }
 }

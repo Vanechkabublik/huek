@@ -15,6 +15,8 @@ final class Auth
 
     private static ?array $user = null;
     private static bool $loaded = false;
+    /** Текст блокировки, если сессия принадлежала заблокированному пользователю (для сообщения вместо «Войдите»). */
+    private static ?string $banMessage = null;
 
     public static function start(): void
     {
@@ -41,7 +43,15 @@ final class Auth
             $id = (int) ($_SESSION['uid'] ?? 0);
             if ($id > 0) {
                 $user = User::find($id);
+                if ($user !== null && (int) $user['is_blocked'] === 1) {
+                    Ban::sweep(true);                               // вдруг срок блокировки уже истёк
+                    $user = User::find($id);
+                }
                 if ($user === null || (int) $user['is_blocked'] === 1) {
+                    if ($user !== null) {
+                        self::$banMessage = Ban::userMessage($user);
+                        $_SESSION['flash_ban'] = self::$banMessage;   // покажем причину на странице входа
+                    }
                     self::forget();
                 } else {
                     self::$user = $user;
@@ -70,10 +80,11 @@ final class Auth
 
     /**
      * Проверяет email+пароль и открывает сессию.
-     * @throws HttpException 401 — неверные данные, 403 — аккаунт заблокирован
+     * @throws HttpException 401 — неверные данные, 403 — аккаунт или IP заблокирован (с причиной)
      */
     public static function login(string $email, string $password): array
     {
+        Ban::assertIpAllowed($email);
         $row = User::findForLogin($email);
 
         // password_verify вызываем всегда — чтобы время ответа не выдавало, существует ли email
@@ -81,28 +92,54 @@ final class Auth
         $valid = password_verify($password, $hash) && $row !== null && $row['password_hash'] !== null;
 
         if (!$valid) {
+            Security::log('login_failed', $row !== null ? (int) $row['id'] : null, 'email', $email);
             throw new HttpException('Неверный email или пароль', 401, ['password' => 'Неверный email или пароль']);
         }
-        if ((int) $row['is_blocked'] === 1) {
-            throw new HttpException('Ваш аккаунт заблокирован администратором', 403);
-        }
+        self::assertNotBanned($row, 'email');
         if (password_needs_rehash($row['password_hash'], PASSWORD_DEFAULT)) {
             User::setPassword((int) $row['id'], $password);
         }
 
-        self::open((int) $row['id']);
+        self::open((int) $row['id'], 'email');
         return self::user() ?? [];
     }
 
-    /** Открывает сессию для пользователя (после входа или регистрации). */
-    public static function open(int $userId): void
+    /**
+     * Не пускает заблокированного пользователя и объясняет причину. Работает для любого способа входа
+     * (пароль, Яндекс, Google): вызывается после того, как личность подтверждена.
+     * @param array<string,mixed> $user запись пользователя (нужны is_blocked, ban_reason, banned_until)
+     */
+    public static function assertNotBanned(array $user, string $provider): void
+    {
+        if ((int) $user['is_blocked'] !== 1) {
+            return;
+        }
+        Ban::sweep(true);
+        $fresh = User::find((int) $user['id']);
+        if ($fresh === null || (int) $fresh['is_blocked'] !== 1) {
+            return;                       // срок истёк
+        }
+        Security::log('banned', (int) $fresh['id'], $provider);
+        throw new HttpException(Ban::userMessage($fresh), 403);
+    }
+
+    /**
+     * Открывает сессию для пользователя (после входа или регистрации) и пишет запись в журнал входов.
+     * @param string $provider email | google | yandex
+     */
+    public static function open(int $userId, string $provider = 'email', bool $created = false): void
     {
         session_regenerate_id(true);          // защита от фиксации сессии
         $_SESSION['uid'] = $userId;
+        if ($created) {
+            User::recordSignup($userId);
+        }
         User::touchLogin($userId);
+        Security::log($created ? 'register' : 'login', $userId, $provider);
         Csrf::rotate();
         self::$loaded = false;
         self::$user = null;
+        self::$banMessage = null;
     }
 
     public static function logout(): void
@@ -132,7 +169,9 @@ final class Auth
             return $user;
         }
         if ($json) {
-            throw new HttpException('Войдите в аккаунт, чтобы продолжить', 401);
+            throw self::$banMessage !== null
+                ? new HttpException(self::$banMessage, 403)
+                : new HttpException('Войдите в аккаунт, чтобы продолжить', 401);
         }
         Response::redirect('/login.php?next=' . rawurlencode($_SERVER['REQUEST_URI'] ?? '/'));
     }

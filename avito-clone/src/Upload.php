@@ -17,6 +17,8 @@ final class Upload
     public const MAX_SIDE   = 1600;              // длинная сторона основного фото
     public const THUMB_SIDE = 640;               // длинная сторона миниатюры
     public const AVATAR_SIDE = 256;              // сторона квадратного аватара
+    public const MAX_VIDEO_BYTES = 50 * 1024 * 1024;   // видеообзор: до 50 МБ
+    public const MAX_VIDEO_SECONDS = 180;              // и до 3 минут (проверяем у MP4/MOV по заголовку файла)
 
     private const ALLOWED = [
         'image/jpeg' => IMAGETYPE_JPEG,
@@ -72,6 +74,132 @@ final class Upload
         }
         @chmod(UPLOAD_DIR . '/' . $name, 0644);
         return self::url($name);
+    }
+
+    /**
+     * Видеообзор объявления: MP4/MOV (H.264/HEVC) или WebM, до 50 МБ и 3 минут. Файл не перекодируется (на сервере нет ffmpeg),
+     * поэтому тип проверяется по сигнатуре содержимого, а не по имени и заголовку от клиента; имя генерирует сервер.
+     * @return array{filename:string,url:string}
+     */
+    public static function storeVideo(array $file): array
+    {
+        self::assertUploaded($file, 'Видео слишком большое: максимум ' . (self::MAX_VIDEO_BYTES / 1048576) . ' МБ');
+        $tmp = (string) $file['tmp_name'];
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0 || $size > self::MAX_VIDEO_BYTES) {
+            throw new HttpException('Видео слишком большое: максимум ' . (self::MAX_VIDEO_BYTES / 1048576) . ' МБ', 422);
+        }
+        $ext = self::detectVideo($tmp);
+        if ($ext === null) {
+            throw new HttpException('Допустимы видео MP4, MOV или WebM', 422);
+        }
+        if ($ext !== 'webm') {
+            $seconds = self::mp4Duration($tmp);
+            if ($seconds !== null && $seconds > self::MAX_VIDEO_SECONDS) {
+                throw new HttpException('Видео длиннее ' . (self::MAX_VIDEO_SECONDS / 60) . ' минут — сократите его', 422);
+            }
+        }
+        self::ensureDir();
+        $name = 'v_' . bin2hex(random_bytes(12)) . '.' . $ext;
+        if (!@move_uploaded_file($tmp, UPLOAD_DIR . '/' . $name) && !(!is_uploaded_file($tmp) && @rename($tmp, UPLOAD_DIR . '/' . $name))) {
+            throw new HttpException('Не удалось сохранить видео', 500);
+        }
+        @chmod(UPLOAD_DIR . '/' . $name, 0644);
+        $_SESSION['pending_uploads'][$name] = time();
+        return ['filename' => $name, 'url' => self::url($name)];
+    }
+
+    /** Расширение по сигнатуре: mp4 | mov | webm, иначе null. */
+    private static function detectVideo(string $path): ?string
+    {
+        $fh = @fopen($path, 'rb');
+        if ($fh === false) {
+            return null;
+        }
+        $head = (string) fread($fh, 64);
+        fclose($fh);
+        if (strlen($head) >= 12 && substr($head, 4, 4) === 'ftyp') {
+            return str_starts_with(substr($head, 8, 4), 'qt') ? 'mov' : 'mp4';
+        }
+        if (strncmp($head, "\x1A\x45\xDF\xA3", 4) === 0 && str_contains($head, 'webm')) {
+            return 'webm';
+        }
+        return null;
+    }
+
+    /** Длительность MP4/MOV в секундах по боксу mvhd (быстро: читаем только заголовки боксов) или null, если не удалось. */
+    private static function mp4Duration(string $path): ?float
+    {
+        $fh = @fopen($path, 'rb');
+        if ($fh === false) {
+            return null;
+        }
+        try {
+            $end = (int) filesize($path);
+            $pos = 0;
+            for ($i = 0; $i < 64 && $pos + 8 <= $end; $i++) {
+                fseek($fh, $pos);
+                $h = (string) fread($fh, 16);
+                if (strlen($h) < 8) {
+                    return null;
+                }
+                $len = (int) unpack('N', substr($h, 0, 4))[1];
+                $type = substr($h, 4, 4);
+                $hdr = 8;
+                if ($len === 1 && strlen($h) >= 16) {          // 64-битный размер
+                    $len = (int) unpack('J', substr($h, 8, 8))[1];
+                    $hdr = 16;
+                } elseif ($len === 0) {
+                    $len = $end - $pos;
+                }
+                if ($len < $hdr) {
+                    return null;
+                }
+                if ($type === 'moov') {
+                    return self::mvhdSeconds($fh, $pos + $hdr, $pos + $len);
+                }
+                $pos += $len;
+            }
+        } finally {
+            fclose($fh);
+        }
+        return null;
+    }
+
+    private static function mvhdSeconds($fh, int $from, int $to): ?float
+    {
+        $pos = $from;
+        for ($i = 0; $i < 32 && $pos + 8 <= $to; $i++) {
+            fseek($fh, $pos);
+            $h = (string) fread($fh, 8);
+            if (strlen($h) < 8) {
+                return null;
+            }
+            $len = (int) unpack('N', substr($h, 0, 4))[1];
+            if ($len < 8) {
+                return null;
+            }
+            if (substr($h, 4, 4) === 'mvhd') {
+                $b = (string) fread($fh, 32);
+                $version = ord($b[0] ?? "\0");
+                if ($version === 1) {
+                    $ts = (int) unpack('N', substr($b, 20, 4))[1];
+                    $dur = (int) unpack('J', substr($b, 24, 8))[1];
+                } else {
+                    $ts = (int) unpack('N', substr($b, 12, 4))[1];
+                    $dur = (int) unpack('N', substr($b, 16, 4))[1];
+                }
+                return $ts > 0 ? $dur / $ts : null;
+            }
+            $pos += $len;
+        }
+        return null;
+    }
+
+    /** Имя видеофайла, созданного нами. */
+    public static function isVideoName(string $filename): bool
+    {
+        return (bool) preg_match('/^v_[a-f0-9]{24}\.(mp4|mov|webm)$/', $filename);
     }
 
     /**
@@ -176,6 +304,11 @@ final class Upload
     /** Удаляет оригинал и миниатюру. Файлы вне формата «24 hex + .jpg» (демо seed_*) не трогаем. */
     public static function remove(string $filename): void
     {
+        if (self::isVideoName($filename)) {
+            @unlink(UPLOAD_DIR . '/' . $filename);
+            unset($_SESSION['pending_uploads'][$filename]);
+            return;
+        }
         if (!self::isManaged($filename)) {
             return;
         }
@@ -207,7 +340,7 @@ final class Upload
             : self::url($filename);
     }
 
-    private static function assertUploaded(array $file): void
+    private static function assertUploaded(array $file, string $tooBig = 'Файл слишком большой (максимум 5 МБ)'): void
     {
         $err = $file['error'] ?? UPLOAD_ERR_NO_FILE;
         // _local — файл, который скачали мы сами (аватар из Google/Яндекс), а не загрузил браузер
@@ -215,7 +348,7 @@ final class Upload
             return;
         }
         throw new HttpException(match ($err) {
-            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'Файл слишком большой (максимум 5 МБ)',
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => $tooBig,
             UPLOAD_ERR_NO_FILE                        => 'Выберите файл',
             default                                   => 'Не удалось загрузить файл',
         }, 422);

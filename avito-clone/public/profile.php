@@ -50,6 +50,12 @@ $enabledProviders = OAuth::enabledProviders();
                 </div>
             </div>
             <div class="field">
+                <label class="field__label" for="pCity">Мой город</label>
+                <input class="input" id="pCity" name="city" type="text" maxlength="80" value="<?= e($user['city'] ?? '') ?>" placeholder="Начните вводить: Москва, Казань…" autocomplete="off" data-city-input>
+                <p class="field__hint">Подставляется в новые объявления и в фильтр ленты. Определить автоматически можно кнопкой города в шапке сайта.</p>
+                <p class="field__error" data-error-for="city"></p>
+            </div>
+            <div class="field">
                 <label class="field__label" for="pAbout">О себе</label>
                 <textarea class="textarea" id="pAbout" name="about" rows="4" maxlength="500" placeholder="Расскажите, чем занимаетесь и как с вами удобнее связаться"><?= e($user['about'] ?? '') ?></textarea>
                 <div class="field__meta"><p class="field__error" data-error-for="about"></p><span class="counter" data-counter-for="about"></span></div>

@@ -11,12 +11,21 @@ if (Auth::check()) {
     App\Response::redirect('/index.php');
 }
 
+// Причина блокировки (из сессии: заблокированного пользователя выбросило на вход, либо отказал вход через соцсеть)
+$ban = $_SESSION['flash_ban'] ?? null;
+unset($_SESSION['flash_ban']);
+
 View::header(['title' => 'Вход', 'page' => 'login', 'categories' => false, 'bodyClass' => 'body-soft']);
 ?>
 <main class="container auth">
     <div class="auth__card">
         <h1>Вход</h1>
         <p class="auth__sub">Войдите, чтобы размещать объявления и писать продавцам</p>
+
+        <div class="alert alert--ban" id="banBox" role="alert"<?= $ban ? '' : ' hidden' ?>>
+            <strong>Доступ ограничен</strong>
+            <p><?= e((string) $ban) ?></p>
+        </div>
 
         <form id="loginForm" novalidate>
             <div class="field">
@@ -29,6 +38,7 @@ View::header(['title' => 'Вход', 'page' => 'login', 'categories' => false, '
                 <input class="input" id="password" name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required>
                 <p class="field__error" data-error-for="password"></p>
             </div>
+            <?= View::consentField() ?>
             <button class="btn btn--primary btn--lg btn--block" type="submit">Войти</button>
         </form>
 

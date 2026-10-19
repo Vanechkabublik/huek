@@ -6,7 +6,9 @@ declare(strict_types=1);
  *
  *  GET  dashboard | stats
  *  GET  users (q, filter, page) · user_detail (id)
- *  POST user_block · user_unblock · user_password (id, password) · user_delete · user_role (id, role)
+ *  POST user_ban (id, reason, duration, ban_ip) · user_unban (id, lift_ip) · user_password (id, password) · user_delete · user_role (id, role)
+ *  GET  ip_bans · security (event, ip, user, page) · legal · POST ip_ban_add (ip, reason, scope, duration) · ip_ban_delete (id)
+ *       legal_save (slug, title, body) · settings_save (site_name, operator, contact_email)
  *  GET  ads (status, user, q, category, sort, page) · ad_detail (id)
  *  POST ad_moderate (id, status, reason) · ad_delete (id) · ads_bulk (ids[], action, reason)
  *  GET  categories · attributes (category_id)
@@ -22,10 +24,15 @@ use App\Admin;
 use App\Attribute;
 use App\Audit;
 use App\Auth;
+use App\Ban;
 use App\Category;
+use App\Client;
 use App\HttpException;
+use App\Legal;
 use App\Request;
 use App\Response;
+use App\Security;
+use App\Settings;
 use App\Review;
 
 Response::handleExceptions();
@@ -65,11 +72,56 @@ switch (Request::action('dashboard')) {
     case 'user_detail':
         Response::ok(Admin::userDetail(Request::int('id')));
 
+    case 'user_ban':
     case 'user_block':
+        Request::requirePost();
+        $ips = Admin::banUser(
+            Request::int('id'),
+            Request::str('reason'),
+            Request::str('duration', 'forever'),
+            !empty(Request::input()['ban_ip']),
+            $admin
+        );
+        Response::ok(['banned_ips' => $ips]);
+
+    case 'user_unban':
     case 'user_unblock':
         Request::requirePost();
-        Admin::setBlocked(Request::int('id'), Request::action() === 'user_block', $admin);
+        Admin::unbanUser(Request::int('id'), !empty(Request::input()['lift_ip']), $admin);
         Response::ok();
+
+    // ----- безопасность: баны по IP, журнал входов
+    case 'ip_bans':
+        Response::ok(['items' => Ban::listIps(), 'my_ip' => Client::ip()]);
+
+    case 'ip_ban_add':
+        Request::requirePost();
+        Admin::addIpBan(Request::str('ip'), Request::str('reason'), Request::str('scope', 'auth'), Request::str('duration', 'forever'), $admin);
+        Response::ok();
+
+    case 'ip_ban_delete':
+        Request::requirePost();
+        Admin::removeIpBan(Request::int('id'), $admin);
+        Response::ok();
+
+    case 'security':
+        $log = Security::list(Request::str('event'), Request::str('ip'), Request::int('user'), max(1, Request::int('page', 1)));
+        Response::ok($log + (Request::int('page', 1) <= 1 ? ['summary' => Security::summary()] : []));
+
+    // ----- документы и настройки
+    case 'legal':
+        Response::ok(['documents' => array_values(Legal::all()), 'settings' => Settings::all(), 'consent_version' => Legal::consentVersion()]);
+
+    case 'legal_save':
+        Request::requirePost();
+        Legal::save(Request::str('slug'), Request::str('title'), (string) (Request::input()['body'] ?? ''), $admin);
+        Response::ok(['documents' => array_values(Legal::all()), 'consent_version' => Legal::consentVersion()]);
+
+    case 'settings_save':
+        Request::requirePost();
+        Settings::save(Request::input());
+        Audit::log($admin, 'settings.save', null, null, []);
+        Response::ok(['settings' => Settings::all()]);
 
     case 'user_password':
         Request::requirePost();

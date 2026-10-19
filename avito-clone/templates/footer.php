@@ -4,15 +4,22 @@ use App\View;
 ?>
 <footer class="footer">
     <div class="container footer__inner">
-        <div>
-            <a class="logo logo--sm" href="/index.php"><span class="logo__mark">А<i></i></span><span class="logo__text">Авито<b>-клон</b></span></a>
-            <p class="footer__note">Учебный проект: монолит на PHP + PostgreSQL, без фреймворков.</p>
+        <div class="footer__brand">
+            <?= View::logo('logo--sm') ?>
+            <p class="footer__note">&copy; <?= date('Y') ?> <?= e(App\Settings::siteName()) ?>. Площадка частных объявлений.</p>
+            <?php if (App\Settings::get('contact_email') !== ''): ?>
+                <p class="footer__note"><a href="mailto:<?= e(App\Settings::get('contact_email')) ?>"><?= e(App\Settings::get('contact_email')) ?></a></p>
+            <?php endif; ?>
         </div>
         <nav class="footer__links" aria-label="Ссылки">
             <a href="/index.php">Объявления</a>
             <a href="/create-ad.php">Разместить объявление</a>
             <a href="/favorites.php">Избранное</a>
             <a href="/my-ads.php">Мои объявления</a>
+        </nav>
+        <nav class="footer__links" aria-label="Документы">
+            <a href="/privacy.php">Политика обработки данных</a>
+            <a href="/terms.php">Пользовательское соглашение</a>
         </nav>
     </div>
 </footer>

@@ -7,7 +7,7 @@
 
     const {
         $, $$, el, icon, debounce, plural, ApiError, apiGet, apiPost, handleApiError, toast, setLoading, withLoading,
-        field, openModal, confirmDialog, barChart, emptyState,
+        field, openModal, confirmDialog, barChart, emptyState, clearErrors, showErrors, liveClear,
     } = window.Board;
 
     const STATUS_TABS = [['', 'Все'], ['pending', 'На модерации'], ['approved', 'Одобрены'], ['rejected', 'Отклонены'], ['blocked', 'Заблокированы']];
@@ -45,7 +45,7 @@
             el('div', { class: 'tl-item' }, el('b', {}, h.label), h.details && Object.keys(h.details).length ? ` — ${detailsText(h.details)}` : '',
                 h.date_text ? el('small', {}, `${h.date_text} · ${h.actor_name}`) : null)));
 
-        const DETAIL_KEYS = { title: 'название', reason: 'причина', name: 'имя', email: 'email', from: 'было', to: 'стало', code: 'код', label: 'поле', action: 'действие', done: 'выполнено', failed: 'ошибок', orphaned_ads: 'без категории', review_id: 'отзыв', author_id: 'автор', attribute_id: 'поле #' };
+        const DETAIL_KEYS = { title: 'название', reason: 'причина', name: 'имя', email: 'email', from: 'было', to: 'стало', code: 'код', label: 'поле', action: 'действие', done: 'выполнено', failed: 'ошибок', orphaned_ads: 'без категории', review_id: 'отзыв', author_id: 'автор', attribute_id: 'поле #', until: 'до', ips: 'IP', ip: 'IP', scope: 'вид' };
         const detailsText = (d) => Object.entries(d).map(([k, v]) => `${DETAIL_KEYS[k] || k}: ${v}`).join('; ');
 
         /** Выбор из списка: подпись + select. */
@@ -71,7 +71,7 @@
             const color = (v) => css.getPropertyValue(v).trim();
 
             const queue = el('div', { class: 'mini-list' });
-            if (!d.queue.length) queue.append(el('div', { class: 'mini-empty' }, '🎉 Очередь модерации пуста'));
+            if (!d.queue.length) queue.append(el('div', { class: 'mini-empty' }, 'Очередь модерации пуста'));
             d.queue.forEach((ad) => {
                 const row = el('div', { class: 'mini-row' },
                     el('div', { class: 'mini-row__img' }, ad.cover ? el('img', { src: ad.cover, alt: '' }) : null),
@@ -82,7 +82,7 @@
                             toast('Объявление одобрено');
                             row.remove();
                             s.pending -= 1; setPending(s.pending);
-                            if (!$('.mini-row', queue)) queue.append(el('div', { class: 'mini-empty' }, '🎉 Очередь модерации пуста'));
+                            if (!$('.mini-row', queue)) queue.append(el('div', { class: 'mini-empty' }, 'Очередь модерации пуста'));
                         });
                     } }, icon('check'), 'Одобрить'));
                 queue.append(row);
@@ -90,7 +90,7 @@
 
             const maxCat = Math.max(1, ...d.top_categories.map((c) => c.count));
             const hbars = el('div', { class: 'hbars' }, ...d.top_categories.map((c) =>
-                el('div', { class: 'hbar' }, el('span', {}, c.icon), el('div', { class: 'hbar__track' }, el('div', { class: 'hbar__fill', style: { width: (c.count / maxCat) * 100 + '%' } }), ),
+                el('div', { class: 'hbar' }, el('span', { class: 'hbar__icon' }, icon(c.icon)), el('div', { class: 'hbar__track' }, el('div', { class: 'hbar__fill', style: { width: (c.count / maxCat) * 100 + '%' } }), ),
                     el('b', {}, String(c.count)))));
 
             const audit = el('div', { class: 'mini-list' }, ...(d.audit.length ? d.audit.map((a) =>
@@ -155,7 +155,7 @@
                 if (!isAdmin) {
                     actions.append(
                         el('button', { class: 'btn btn--outline btn--xs', type: 'button', onClick: () => changePassword(u) }, icon('key'), 'Пароль'),
-                        el('button', { class: `btn btn--xs ${u.is_blocked ? 'btn--success' : 'btn--dark'}`, type: 'button', onClick: (e) => toggleBlock(u, e.currentTarget) },
+                        el('button', { class: `btn btn--xs ${u.is_blocked ? 'btn--success' : 'btn--dark'}`, type: 'button', onClick: () => toggleBlock(u) },
                             icon(u.is_blocked ? 'unlock' : 'lock'), u.is_blocked ? 'Разблокировать' : 'Заблокировать'),
                         el('button', { class: 'btn btn--danger btn--xs', type: 'button', onClick: () => removeUser(u) }, icon('trash'), 'Удалить'));
                 }
@@ -165,8 +165,10 @@
                             isAdmin ? pill('admin', 'Администратор') : null, ...u.social.map((c) => pill('admin', PROVIDER_NAMES[c] || c))))),
                     el('td', { class: 'nowrap', 'data-label': 'Телефон' }, u.phone || '—'),
                     el('td', { class: 'nowrap', 'data-label': 'Регистрация' }, u.created_at),
-                    el('td', { class: 'nowrap', 'data-label': 'Последний вход' }, u.last_login),
-                    el('td', { 'data-label': 'Статус' }, u.is_blocked ? pill('blocked', 'Заблокирован') : pill('active', 'Активен')),
+                    el('td', { class: 'nowrap', 'data-label': 'Последний вход' }, el('div', { class: 'cell-stack' }, el('span', {}, u.last_login), u.last_ip ? el('span', { class: 'cell-sub mono' }, u.last_ip) : null)),
+                    el('td', { 'data-label': 'Статус' }, u.is_blocked
+                        ? el('div', { class: 'cell-stack' }, pill('blocked', 'Заблокирован'), u.ban_reason ? el('span', { class: 'cell-sub cell-reason', title: u.ban_reason }, u.ban_reason) : null)
+                        : pill('active', 'Активен')),
                     el('td', { class: 'num', 'data-label': 'Объявлений' }, String(u.ads_count)),
                     el('td', {}, actions));
             }
@@ -187,15 +189,51 @@
                 }
             }
 
-            async function toggleBlock(u, btn) {
-                const block = !u.is_blocked;
-                if (block && !(await confirmDialog(`${u.name} не сможет войти на сайт, а его объявления пропадут из ленты.`, { title: 'Заблокировать пользователя?', confirmText: 'Заблокировать' }))) return;
-                await withLoading(btn, async () => {
-                    await adminPost(block ? 'user_block' : 'user_unblock', { id: u.id });
-                    u.is_blocked = block;
-                    toast(block ? 'Пользователь заблокирован' : 'Пользователь разблокирован');
-                    render();
+            /** Блокировка с причиной (её увидит сам пользователь при входе любым способом), сроком и, по желанию, баном его IP. */
+            async function banDialog(u) {
+                const reason = el('textarea', { class: 'textarea', name: 'reason', rows: 3, maxlength: 500, placeholder: 'Например: мошенничество, спам, оскорбления' });
+                reason.style.minHeight = '90px';
+                const until = el('input', { class: 'input', type: 'date', name: 'until', hidden: true, min: new Date(Date.now() + 86400000).toISOString().slice(0, 10) });
+                const duration = el('select', { class: 'select', name: 'duration' },
+                    ...[['forever', 'Навсегда'], ['1d', 'На 1 день'], ['7d', 'На 7 дней'], ['30d', 'На 30 дней'], ['date', 'До даты…']].map(([v, t]) => el('option', { value: v }, t)));
+                duration.addEventListener('change', () => { until.hidden = duration.value !== 'date'; });
+                const body = el('div', {},
+                    el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Причина — её увидит пользователь'), reason, el('p', { class: 'field__error', 'data-error-for': 'reason' })),
+                    el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Срок'), duration, until, el('p', { class: 'field__error', 'data-error-for': 'duration' })),
+                    checkField('ban_ip', 'Заблокировать также IP-адреса пользователя (при регистрации и последнего входа)'),
+                    el('p', { class: 'field__hint' }, 'Объявления пользователя пропадут из ленты, вход будет закрыт. Блокировка по IP закрывает вход и регистрацию с этих адресов.'));
+                const done = await openModal({
+                    title: `Заблокировать: ${u.name}`, content: body, submitText: 'Заблокировать', danger: true,
+                    onSubmit: async (form) => {
+                        const d = duration.value === 'date' ? until.value : duration.value;
+                        if (duration.value === 'date' && !d) throw new ApiError('', 422, { duration: 'Выберите дату' });
+                        const res = await adminPost('user_ban', { id: u.id, reason: reason.value, duration: d, ban_ip: form.elements.ban_ip.checked });
+                        u.is_blocked = true;
+                        u.ban_reason = reason.value.trim();
+                        toast(res.banned_ips && res.banned_ips.length ? `Заблокирован; IP: ${res.banned_ips.join(', ')}` : 'Пользователь заблокирован');
+                    },
                 });
+                return done;
+            }
+
+            async function unbanDialog(u) {
+                const body = el('div', {}, el('p', { class: 'modal__text' }, `${u.name} снова сможет входить, а его объявления вернутся в ленту.`),
+                    checkField('lift_ip', 'Снять и блокировку по IP-адресам этого пользователя', true));
+                return openModal({
+                    title: 'Разблокировать пользователя?', content: body, submitText: 'Разблокировать', submitKind: 'btn--success',
+                    onSubmit: async (form) => {
+                        await adminPost('user_unban', { id: u.id, lift_ip: form.elements.lift_ip.checked });
+                        u.is_blocked = false;
+                        u.ban_reason = null;
+                        toast('Пользователь разблокирован');
+                    },
+                });
+            }
+
+            async function toggleBlock(u) {
+                const done = u.is_blocked ? await unbanDialog(u) : await banDialog(u);
+                if (done) render();
+                return done;
             }
 
             async function changePassword(u) {
@@ -232,7 +270,7 @@
                 let d;
                 try { d = await adminApi('user_detail', { id }); } catch (err) { handleApiError(err); return; }
                 const u = d.user;
-                const row = state.items.find((x) => x.id === id) || { id, name: u.name, email: u.email, ads_count: d.ads.all, is_blocked: u.is_blocked };
+                const row = state.items.find((x) => x.id === id) || { id, name: u.name, email: u.email, ads_count: d.ads.all, is_blocked: u.is_blocked, ban_reason: d.ban.reason };
                 const isAdmin = u.role === 'admin';
                 const recent = el('div', { class: 'mini-list' }, ...(d.recent.length ? d.recent.map((ad) =>
                     el('div', { class: 'mini-row' }, el('div', { class: 'mini-row__img' }, ad.cover ? el('img', { src: ad.cover, alt: '' }) : null),
@@ -251,14 +289,27 @@
                             el('div', { class: 'stat-row' },
                                 el('span', {}, 'Объявлений: ', el('b', {}, String(d.ads.all))), el('span', {}, 'на модерации: ', el('b', {}, String(d.ads.pending))),
                                 el('span', {}, 'в избранном: ', el('b', {}, String(d.favorites))), el('span', {}, 'диалогов: ', el('b', {}, String(d.chats))),
-                                el('span', {}, 'отзывов: ', el('b', {}, `${d.reviews.count}${d.reviews.count ? ` (★ ${d.reviews.avg})` : ''}`)))),
+                                el('span', {}, 'отзывов: ', el('b', {}, `${d.reviews.count}${d.reviews.count ? ` (рейтинг ${d.reviews.avg})` : ''}`)))),
                         el('div', {}, el('div', { class: 'detail-section-title', style: { marginTop: 0 } }, 'Последние объявления'), recent)),
+                    d.ban.active ? el('div', { class: 'alert alert--ban' }, el('strong', {}, 'Аккаунт заблокирован'),
+                        el('p', {}, d.ban.reason || 'причина не указана'),
+                        el('p', { class: 'muted' }, `${d.ban.at ? 'С ' + d.ban.at : ''}${d.ban.until ? ' · до ' + d.ban.until : ' · бессрочно'}${d.ban.by ? ' · ' + d.ban.by : ''}`)) : null,
+                    el('div', { class: 'detail-section-title' }, 'Сеть и устройство'),
+                    el('dl', { class: 'kv' },
+                        el('dt', {}, 'IP при регистрации'), el('dd', {}, d.net.signup_ip ? el('code', {}, d.net.signup_ip) : '—'),
+                        el('dt', {}, 'Последний IP'), el('dd', {}, d.net.last_ip ? [el('code', {}, d.net.last_ip), d.net.last_ip_banned ? pill('blocked', 'IP в бане') : null, d.net.same_ip_users ? el('span', { class: 'muted' }, ` · ещё ${d.net.same_ip_users} ${plural(d.net.same_ip_users, 'аккаунт', 'аккаунта', 'аккаунтов')} с этого IP`) : null] : '—'),
+                        el('dt', {}, 'Устройство'), el('dd', {}, d.net.last_device ? `${d.net.last_device.browser} · ${d.net.last_device.os} · ${d.net.last_device.device}` : '—'),
+                        el('dt', {}, 'User-Agent'), el('dd', { class: 'mono small' }, d.net.last_ua || '—'),
+                        el('dt', {}, 'Город'), el('dd', {}, u.city || '—'),
+                        el('dt', {}, 'Согласие с политикой'), el('dd', {}, d.consent.at ? `${d.consent.at} (версия ${d.consent.version || '—'})` : 'не зафиксировано')),
+                    el('div', { class: 'detail-section-title' }, 'Последние входы'), loginsTable(d.logins),
                     el('div', { class: 'detail-section-title' }, 'История действий администраторов'), timeline(d.history));
 
                 const closeBtn = () => $('.modal-overlay.is-open [type="submit"]')?.click();
                 const actions = [];
                 if (!isAdmin) {
-                    actions.push({ label: u.is_blocked ? 'Разблокировать' : 'Заблокировать', cls: u.is_blocked ? 'btn--success' : 'btn--dark', run: () => toggleBlock(row, null) });
+                    actions.push({ label: u.is_blocked ? 'Разблокировать' : 'Заблокировать', cls: u.is_blocked ? 'btn--success' : 'btn--dark', run: () => toggleBlock(row) });
+                    if (d.net.last_ip && !d.net.last_ip_banned) actions.push({ label: 'Забанить IP', cls: 'btn--outline', run: () => ipBanDialog(d.net.last_ip) });
                     actions.push({ label: 'Сменить пароль', cls: 'btn--outline', run: () => changePassword(row) });
                     actions.push({ label: 'Сделать админом', cls: 'btn--outline', run: () => setRole(u, 'admin') });
                     actions.push({ label: 'Удалить', cls: 'btn--danger', run: () => removeUser(row) });
@@ -297,7 +348,7 @@
             const chips = el('div', { class: 'toolbar' });
             const search = el('input', { class: 'input', type: 'search', placeholder: 'Поиск по заголовку, email автора или #id…', autocomplete: 'off', 'aria-label': 'Поиск объявлений' });
             const catSel = el('select', { class: 'select', 'aria-label': 'Категория' }, el('option', { value: '' }, 'Все категории'), el('option', { value: '-1' }, 'Без категории'),
-                ...categories.map((c) => el('option', { value: String(c.id) }, `${c.icon} ${c.name}`)));
+                ...categories.map((c) => el('option', { value: String(c.id) }, c.name)));
             catSel.value = state.category;
             const sortSel = el('select', { class: 'select', 'aria-label': 'Сортировка' },
                 ...[['date_desc', 'Сначала новые'], ['date_asc', 'Сначала старые'], ['price_desc', 'Цена ↓'], ['price_asc', 'Цена ↑'], ['views_desc', 'По просмотрам']].map(([v, t]) => el('option', { value: v }, t)));
@@ -374,7 +425,7 @@
                     el('td', { class: 'num', 'data-label': 'ID' }, '#' + ad.id),
                     el('td', { 'data-label': 'Объявление' }, el('div', { class: 'cell-stack' },
                         el('a', { class: 'cell-title', href: ad.url, target: '_blank', rel: 'noopener', title: ad.title }, ad.title),
-                        el('span', { class: 'cell-sub' }, `${ad.category_icon} ${ad.category_name} · ${ad.city}`))),
+                        el('span', { class: 'cell-sub' }, `${ad.category_name} · ${ad.city}`))),
                     el('td', { 'data-label': 'Пользователь' }, el('div', { class: 'cell-stack' }, el('span', { class: 'cell-title', title: ad.user_name }, ad.user_email || ad.user_name), ad.user_blocked ? pill('blocked', 'Автор заблокирован') : null)),
                     el('td', { class: 'price', 'data-label': 'Цена' }, ad.price_text),
                     el('td', { 'data-label': 'Статус' }, el('div', { class: 'cell-stack' }, pill(ad.status, ad.status_label), ad.rejection_reason && ad.status !== 'approved' ? el('span', { class: 'cell-reason' }, ad.rejection_reason) : null)),
@@ -527,7 +578,7 @@
 
             function row(cat) {
                 return el('div', { class: 'cat-row' },
-                    el('div', { class: 'cat-row__icon' }, cat.icon),
+                    el('div', { class: 'cat-row__icon' }, icon(cat.icon_key)),
                     el('div', { class: 'cat-row__name' }, cat.name),
                     el('div', { class: 'cat-row__count' }, `${cat.total_ads} ${plural(cat.total_ads, 'объявление', 'объявления', 'объявлений')}`),
                     el('div', { class: 'row-actions' },
@@ -538,7 +589,6 @@
 
             /** Inline-редактирование: строка превращается в поля ввода. */
             function edit(cat, view) {
-                const iconInput = el('input', { class: 'input cat-row__icon-input', value: cat.icon, maxlength: 8, 'aria-label': 'Иконка' });
                 const nameInput = el('input', { class: 'input', value: cat.name, maxlength: 80, 'aria-label': 'Название' });
                 const err = el('span', { class: 'field__error', style: { gridColumn: '2 / -1' } });
                 const save = el('button', { class: 'btn btn--primary btn--sm', type: 'button' }, icon('check'), 'Сохранить');
@@ -546,8 +596,8 @@
                 const run = async () => {
                     setLoading(save, true);
                     try {
-                        await adminPost('category_update', { id: cat.id, name: nameInput.value, icon: iconInput.value });
-                        Object.assign(cat, { name: nameInput.value.trim(), icon: iconInput.value.trim() || '📦' });
+                        await adminPost('category_update', { id: cat.id, name: nameInput.value });
+                        Object.assign(cat, { name: nameInput.value.trim() });
                         toast('Категория сохранена');
                         editRow.replaceWith(row(cat));
                     } catch (e) {
@@ -558,8 +608,7 @@
                 };
                 save.addEventListener('click', run);
                 nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); if (e.key === 'Escape') cancel.click(); });
-                const editRow = el('div', { class: 'cat-row' }, iconInput, nameInput, el('div', { class: 'row-actions' }, save, cancel), err);
-                editRow.style.gridTemplateColumns = '56px minmax(0, 1fr) auto';
+                const editRow = el('div', { class: 'cat-row' }, el('div', { class: 'cat-row__icon' }, icon(cat.icon_key)), nameInput, el('div', { class: 'row-actions' }, save, cancel), err);
                 view.replaceWith(editRow);
                 nameInput.focus();
                 nameInput.select();
@@ -581,11 +630,11 @@
             }
 
             async function categoryModal() {
-                const body = el('div', {}, field({ name: 'name', label: 'Название', placeholder: 'Например, Спорт и отдых', maxlength: 80 }), field({ name: 'icon', label: 'Иконка (эмодзи)', placeholder: '⚽', maxlength: 8 }));
+                const body = el('div', {}, field({ name: 'name', label: 'Название', placeholder: 'Например, Спорт и отдых', maxlength: 80 }));
                 body.firstElementChild.style.marginBottom = '14px';
                 const done = await openModal({
                     title: 'Новая категория', submitText: 'Добавить', content: body,
-                    onSubmit: async (form) => { await adminPost('category_create', { name: form.elements.name.value, icon: form.elements.icon.value }); },
+                    onSubmit: async (form) => { await adminPost('category_create', { name: form.elements.name.value }); },
                 });
                 if (done) { toast('Категория добавлена'); await refresh(); }
             }
@@ -643,7 +692,7 @@
 
                 await reloadDefs();
                 // Основное окно не закрываем при открытии вложенных модалок: просто показываем список
-                await openModal({ title: `Характеристики: ${cat.icon} ${cat.name}`, content: body, submitText: 'Готово', hideCancel: true, modalClass: 'modal--wide' });
+                await openModal({ title: `Характеристики: ${cat.name}`, content: body, submitText: 'Готово', hideCancel: true, modalClass: 'modal--wide' });
             }
 
             async function refresh() {
@@ -729,6 +778,188 @@
             }
             filterSel.addEventListener('change', () => { state.filter = filterSel.value; load(); });
             await load();
+        }
+
+        /* --------------------------------------------------------------------- безопасность */
+
+        const EVENT_LABELS = { login: 'Вход', register: 'Регистрация', login_failed: 'Неверный пароль', banned: 'Вход заблокирован', ip_banned: 'IP в бане' };
+        const EVENT_PILLS = { login: 'approved', register: 'admin', login_failed: 'pending', banned: 'blocked', ip_banned: 'blocked' };
+        const METHOD_LABELS = { email: 'Email', google: 'Google', yandex: 'Яндекс' };
+
+        const deviceText = (r) => `${r.browser} · ${r.os} · ${r.device}`;
+
+        /** Таблица входов (для карточки пользователя и журнала). */
+        function loginsTable(items, { withUser = false } = {}) {
+            if (!items.length) return el('div', { class: 'mini-empty' }, 'Записей нет');
+            return el('div', { class: 'table-wrap table-wrap--flat' }, el('table', { class: 'table table--compact' },
+                el('thead', {}, el('tr', {}, ...['Когда', withUser ? 'Кто' : null, 'Событие', 'Способ', 'IP', 'Устройство'].filter(Boolean).map((h) => el('th', {}, h)))),
+                el('tbody', {}, ...items.map((r) => el('tr', {},
+                    el('td', { class: 'nowrap', 'data-label': 'Когда' }, r.created_at),
+                    withUser ? el('td', { 'data-label': 'Кто' }, r.user_id ? el('a', { href: '#/users' }, r.user || r.email || `#${r.user_id}`) : (r.email || '—')) : null,
+                    el('td', { 'data-label': 'Событие' }, pill(EVENT_PILLS[r.event] || 'pending', EVENT_LABELS[r.event] || r.event)),
+                    el('td', { 'data-label': 'Способ' }, METHOD_LABELS[r.provider] || r.provider || '—'),
+                    el('td', { class: 'mono', 'data-label': 'IP' }, r.ip || '—'),
+                    el('td', { 'data-label': 'Устройство', title: r.ua || '' }, deviceText(r))))))); 
+        }
+
+        /** Окно «Забанить IP»: адрес или сеть, причина, вид (вход/регистрация или весь сайт), срок. */
+        async function ipBanDialog(ip = '') {
+            const input = field({ name: 'ip', label: 'IP-адрес или сеть', placeholder: '203.0.113.7 или 203.0.113.0/24', value: ip });
+            const reason = el('input', { class: 'input', name: 'reason', maxlength: 500, placeholder: 'Причина (её увидят заблокированные)' });
+            const scope = selectField('scope', 'Что закрыть', [['auth', 'Вход и регистрация (мягко)'], ['site', 'Весь сайт']], 'auth');
+            const duration = selectField('duration', 'Срок', [['forever', 'Навсегда'], ['1d', 'На 1 день'], ['7d', 'На 7 дней'], ['30d', 'На 30 дней']], 'forever');
+            const body = el('div', {}, input, el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Причина'), reason, el('p', { class: 'field__error', 'data-error-for': 'reason' })), scope, duration,
+                el('p', { class: 'field__hint' }, 'Общие адреса (мобильные сети, офисы) лучше закрывать мягко — только вход и регистрация. Себя заблокировать нельзя.'));
+            const done = await openModal({
+                title: 'Заблокировать IP', content: body, submitText: 'Заблокировать', danger: true,
+                onSubmit: async (form) => {
+                    await adminPost('ip_ban_add', { ip: form.elements.ip.value, reason: form.elements.reason.value, scope: form.elements.scope.value, duration: form.elements.duration.value });
+                    toast('IP заблокирован');
+                },
+            });
+            return done;
+        }
+
+        async function viewSecurity(params) {
+            const state = { tab: params.get('tab') || 'log', event: '', ip: params.get('ip') || '', page: 1, items: [], total: 0, hasMore: false, token: 0 };
+            const tabsBox = el('div', { class: 'tabs' });
+            const body = el('div');
+            content.replaceChildren(header('Безопасность', 'Журнал входов, блокировки по IP и устройства посетителей', exportLink('export_users', {}, 'Пользователи CSV')), tabsBox, body);
+
+            const TABS = [['log', 'Журнал входов'], ['ips', 'Баны по IP'], ['devices', 'Устройства и риски']];
+            const renderTabs = () => tabsBox.replaceChildren(...TABS.map(([k, t]) => el('button', { type: 'button', class: `tab${state.tab === k ? ' is-active' : ''}`, onClick: () => { state.tab = k; renderTabs(); show(); } }, t)));
+
+            async function show() {
+                body.replaceChildren(el('div', { class: 'sk', style: { height: '160px', borderRadius: '12px' } }));
+                try {
+                    if (state.tab === 'log') await showLog(); else if (state.tab === 'ips') await showIps(); else await showDevices();
+                } catch (err) { handleApiError(err); }
+            }
+
+            async function showLog() {
+                const eventSel = el('select', { class: 'select', 'aria-label': 'Событие' }, el('option', { value: '' }, 'Все события'), ...Object.entries(EVENT_LABELS).map(([v, t]) => el('option', { value: v }, t)));
+                eventSel.value = state.event;
+                const ipInput = el('input', { class: 'input', type: 'search', placeholder: 'Фильтр по IP-адресу', value: state.ip, 'aria-label': 'IP-адрес' });
+                const table = el('div', { class: 'panel' });
+                const foot = el('div', { class: 'table-foot' });
+                const more = el('button', { class: 'btn btn--outline btn--sm', type: 'button', onClick: () => load(true) }, 'Показать ещё');
+                body.replaceChildren(el('div', { class: 'toolbar' }, el('div', { class: 'search-big' }, icon('search'), ipInput), eventSel), table);
+                async function load(append = false) {
+                    const my = ++state.token;
+                    if (append) state.page += 1; else state.page = 1;
+                    const data = await adminApi('security', { event: state.event, ip: state.ip, page: state.page });
+                    if (my !== state.token) return;
+                    state.items = append ? state.items.concat(data.items) : data.items;
+                    state.total = data.total; state.hasMore = data.has_more;
+                    foot.replaceChildren(...[el('span', {}, `Записей: ${state.total}`), state.hasMore && more].filter(Boolean));
+                    table.replaceChildren(loginsTable(state.items, { withUser: true }), foot);
+                    if (state.ip) table.prepend(el('div', { class: 'toolbar toolbar--inline' }, el('span', { class: 'muted' }, `IP ${state.ip}`), el('button', { class: 'btn btn--outline btn--xs', type: 'button', onClick: () => ipBanDialog(state.ip) }, icon('ban'), 'Забанить этот IP')));
+                }
+                eventSel.addEventListener('change', () => { state.event = eventSel.value; load(); });
+                ipInput.addEventListener('input', debounce(() => { state.ip = ipInput.value.trim(); load(); }, 350));
+                await load();
+            }
+
+            async function showIps() {
+                const data = await adminApi('ip_bans');
+                const addBtn = el('button', { class: 'btn btn--primary', type: 'button', onClick: async () => { if (await ipBanDialog()) show(); } }, icon('plus'), 'Забанить IP');
+                const { wrap, tbody } = tableShell(['IP / сеть', 'Что закрыто', 'Причина', 'Срок', 'Кто и когда', ''], 'table--compact');
+                if (!data.items.length) tbody.append(el('tr', {}, el('td', { colspan: 6 }, el('div', { class: 'table-empty' }, 'Заблокированных адресов нет'))));
+                data.items.forEach((b) => tbody.append(el('tr', {},
+                    el('td', { class: 'mono', 'data-label': 'IP' }, b.ip),
+                    el('td', { 'data-label': 'Закрыто' }, pill(b.scope === 'site' ? 'blocked' : 'pending', b.scope === 'site' ? 'Весь сайт' : 'Вход и регистрация')),
+                    el('td', { 'data-label': 'Причина' }, b.reason || '—'),
+                    el('td', { class: 'nowrap', 'data-label': 'Срок' }, b.expires_at ? `до ${b.expires_at}` : 'бессрочно'),
+                    el('td', { class: 'nowrap', 'data-label': 'Кто' }, `${b.by} · ${b.created_at}`),
+                    el('td', {}, el('div', { class: 'row-actions' },
+                        el('button', { class: 'btn btn--outline btn--xs', type: 'button', onClick: () => { state.tab = 'log'; state.ip = b.ip; renderTabs(); show(); } }, 'Входы'),
+                        el('button', { class: 'btn btn--success btn--xs', type: 'button', onClick: async () => {
+                            if (!(await confirmDialog(`${b.ip} снова сможет входить и регистрироваться.`, { title: 'Снять блокировку?', confirmText: 'Снять', danger: false }))) return;
+                            try { await adminPost('ip_ban_delete', { id: b.id }); toast('Блокировка снята'); show(); } catch (err) { handleApiError(err); }
+                        } }, icon('unlock'), 'Снять'))))));
+                body.replaceChildren(el('div', { class: 'toolbar toolbar--inline' }, el('span', { class: 'muted' }, `Ваш IP: ${data.my_ip}`), addBtn), el('div', { class: 'panel' }, wrap));
+            }
+
+            async function showDevices() {
+                const d = (await adminApi('security')).summary;
+                const bars = (title, items) => el('div', { class: 'panel-card' }, el('div', { class: 'panel-card__head' }, el('h2', {}, title)),
+                    items.length ? el('div', { class: 'hbars' }, ...items.map((i) => el('div', { class: 'hbar' }, el('span', { class: 'hbar__label' }, i.name),
+                        el('div', { class: 'hbar__track' }, el('div', { class: 'hbar__fill', style: { width: `${(i.count / items[0].count) * 100}%` } })), el('b', {}, String(i.count)))))
+                        : el('div', { class: 'mini-empty' }, 'Пока нет данных'));
+                body.replaceChildren(
+                    el('p', { class: 'muted', style: { marginBottom: '14px' } }, `Входы и регистрации за 30 дней: ${d.logins_30d}. Данные берутся из User-Agent и IP, которые сайт фиксирует при входе.`),
+                    el('div', { class: 'admin-grid' }, bars('Браузеры', d.browsers), bars('Операционные системы', d.systems), bars('Устройства', d.devices),
+                        el('div', { class: 'panel-card' }, el('div', { class: 'panel-card__head' }, el('h2', {}, 'Подозрительные адреса'), el('span', { class: 'muted' }, 'ошибки входа за 24 ч')),
+                            d.suspicious.length ? el('div', { class: 'mini-list' }, ...d.suspicious.map((r) => el('div', { class: 'mini-row' },
+                                el('div', { class: 'mini-row__body' }, el('code', {}, r.ip), el('div', { class: 'mini-row__sub' }, `${r.fails} неудачных попыток · ${r.logins} email · ${r.last_at}`)),
+                                el('button', { class: 'btn btn--danger btn--xs', type: 'button', onClick: async () => { if (await ipBanDialog(r.ip)) show(); } }, 'Забанить')))) : el('div', { class: 'mini-empty' }, 'Нет'))),
+                    el('div', { class: 'panel-card', style: { marginTop: '16px' } }, el('div', { class: 'panel-card__head' }, el('h2', {}, 'Много аккаунтов с одного IP'), el('span', { class: 'muted' }, 'регистрации, от 3 аккаунтов')),
+                        d.shared.length ? el('div', { class: 'mini-list' }, ...d.shared.map((r) => el('div', { class: 'mini-row' },
+                            el('div', { class: 'mini-row__body' }, el('code', {}, r.ip), el('div', { class: 'mini-row__sub' }, `${r.users} аккаунтов`)),
+                            el('button', { class: 'btn btn--outline btn--xs', type: 'button', onClick: () => { state.tab = 'log'; state.ip = r.ip; renderTabs(); show(); } }, 'Входы')))) : el('div', { class: 'mini-empty' }, 'Нет')));
+            }
+
+            renderTabs();
+            await show();
+        }
+
+        /* --------------------------------------------------------------------- документы и настройки */
+
+        async function viewLegal(params) {
+            const data = await adminApi('legal');
+            const tab = params.get('tab') || 'privacy';
+            const docs = Object.fromEntries(data.documents.map((d) => [d.slug, d]));
+            const tabsBox = el('div', { class: 'tabs' }, ...[['privacy', 'Политика обработки данных'], ['terms', 'Пользовательское соглашение'], ['settings', 'Название и контакты']].map(([k, t]) =>
+                el('button', { type: 'button', class: `tab${tab === k ? ' is-active' : ''}`, onClick: () => (location.hash = `#/legal?tab=${k}`) }, t)));
+            const box = el('div', { class: 'panel-card legal-editor' });
+            content.replaceChildren(header('Документы и настройки', 'Тексты, которые пользователь принимает при входе и регистрации'), tabsBox, box);
+
+            if (tab === 'settings') {
+                const st = data.settings;
+                const form = el('form', { novalidate: true },
+                    field({ name: 'site_name', label: 'Название сайта', value: st.site_name, maxlength: 60, hint: 'Показывается в шапке, подвале, заголовках страниц и в документах (подстановка {{site}}).' }),
+                    field({ name: 'operator', label: 'Оператор персональных данных', value: st.operator, maxlength: 200, placeholder: 'ИП Иванов И. И. / ООО «Название»', hint: 'Подставляется в документы как {{operator}}.' }),
+                    field({ name: 'contact_email', label: 'Контактная почта', type: 'email', value: st.contact_email, maxlength: 120, placeholder: 'privacy@example.com', hint: 'Для запросов пользователей по их данным ({{email}}); показывается в подвале.' }),
+                    el('button', { class: 'btn btn--primary', type: 'submit' }, 'Сохранить'));
+                liveClear(form);
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    clearErrors(form);
+                    const btn = $('[type="submit"]', form);
+                    setLoading(btn, true);
+                    try {
+                        await adminPost('settings_save', Object.fromEntries(new FormData(form)));
+                        toast('Настройки сохранены');
+                    } catch (err) { if (!(err instanceof ApiError && showErrors(form, err.errors))) handleApiError(err); } finally { setLoading(btn, false); }
+                });
+                box.append(form);
+                return;
+            }
+
+            const doc = docs[tab];
+            const form = el('form', { novalidate: true },
+                field({ name: 'title', label: 'Заголовок', value: doc.title, maxlength: 200 }),
+                field({ name: 'body', label: 'Текст', value: doc.body, rows: 22, maxlength: 60000,
+                    hint: 'Разметка: «# Заголовок раздела», «- пункт списка», пустая строка — новый абзац. Подстановки: {{site}}, {{operator}}, {{email}}, {{date}}.' }),
+                el('div', { class: 'form-actions' },
+                    el('button', { class: 'btn btn--primary', type: 'submit' }, 'Сохранить'),
+                    el('a', { class: 'btn btn--outline', href: `/${tab}.php`, target: '_blank', rel: 'noopener' }, icon('eye'), 'Открыть на сайте'),
+                    el('span', { class: 'muted' }, `Версия ${doc.version} · изменён ${new Date(doc.updated_at.replace(' ', 'T')).toLocaleString('ru-RU')}`)),
+                el('p', { class: 'field__hint' }, 'После сохранения номер версии растёт: у пользователей, принимавших прежний текст, отметка согласия остаётся с прежней версией, новым — фиксируется новая.'));
+            $('textarea', form).classList.add('mono-area');
+            liveClear(form);
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                clearErrors(form);
+                const btn = $('[type="submit"]', form);
+                setLoading(btn, true);
+                try {
+                    await adminPost('legal_save', { slug: tab, title: form.elements.title.value, body: form.elements.body.value });
+                    toast('Документ сохранён');
+                    await route();
+                } catch (err) { if (!(err instanceof ApiError && showErrors(form, err.errors))) handleApiError(err); } finally { setLoading(btn, false); }
+            });
+            box.append(form);
         }
 
         /* --------------------------------------------------------------------- интеграции */
@@ -822,7 +1053,7 @@
 
         /* --------------------------------------------------------------------- роутер */
 
-        const routes = { stats: viewStats, users: viewUsers, ads: viewAds, categories: viewCategories, reviews: viewReviews, audit: viewAudit, integrations: viewIntegrations };
+        const routes = { stats: viewStats, users: viewUsers, ads: viewAds, categories: viewCategories, reviews: viewReviews, audit: viewAudit, security: viewSecurity, legal: viewLegal, integrations: viewIntegrations };
         let routeToken = 0;
 
         async function route() {
@@ -836,7 +1067,7 @@
                 await routes[section](new URLSearchParams(query));
             } catch (err) {
                 if (my === routeToken) {
-                    content.replaceChildren(emptyState({ emoji: '😵', title: 'Не удалось загрузить раздел', text: err.message }));
+                    content.replaceChildren(emptyState({ icon: 'alert-circle', title: 'Не удалось загрузить раздел', text: err.message }));
                     handleApiError(err);
                 }
             }

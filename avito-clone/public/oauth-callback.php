@@ -5,6 +5,7 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use App\Auth;
 use App\HttpException;
+use App\Legal;
 use App\OAuth;
 use App\Response;
 
@@ -18,13 +19,17 @@ try {
     if ($res['linked']) {
         $_SESSION['flash_ok'] = "Аккаунт $name привязан";
     } else {
-        Auth::open($res['user_id']);
+        Auth::open($res['user_id'], $res['provider'], $res['created']);
+        if ($res['consent']) {
+            Legal::recordConsent($res['user_id']);                // согласие с политикой, отмеченное на странице входа
+        }
         if ($res['created']) {
             $_SESSION['flash_ok'] = "Добро пожаловать! Аккаунт создан через $name";
         }
     }
     Response::redirect($res['next']);
 } catch (HttpException $e) {
-    $_SESSION['flash_error'] = $e->getMessage();
+    // Блокировку (403) показываем отдельной плашкой на странице входа, остальное — всплывающим сообщением
+    $_SESSION[$e->getCode() === 403 ? 'flash_ban' : 'flash_error'] = $e->getMessage();
     Response::redirect(Auth::check() ? '/profile.php' : '/login.php');
 }

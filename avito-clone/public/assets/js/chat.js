@@ -83,7 +83,7 @@
             sortConvs();
             if (!convs.length) {
                 listBox.replaceChildren(el('div', { class: 'chat__none' },
-                    el('div', { class: 'empty__icon' }, '📭'),
+                    el('div', { class: 'empty__icon' }, icon('inbox')),
                     el('p', {}, 'Диалогов пока нет. Откройте объявление и нажмите «Написать сообщение».')));
                 return;
             }
