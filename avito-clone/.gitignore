@@ -1,0 +1,8 @@
+.env
+*.log
+.DS_Store
+
+# Загруженные пользователями фото (демо-картинки seed_* остаются в репозитории)
+public/uploads/*
+!public/uploads/.gitkeep
+!public/uploads/seed_*

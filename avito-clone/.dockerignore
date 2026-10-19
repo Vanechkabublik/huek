@@ -1,0 +1,8 @@
+.git
+.gitignore
+.env
+node_modules
+*.log
+public/uploads/*
+!public/uploads/.gitkeep
+!public/uploads/seed_*

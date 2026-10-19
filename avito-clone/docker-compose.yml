@@ -1,0 +1,57 @@
+# Доска объявлений — запуск: docker compose up -d --build  →  http://localhost:8080
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: board-app
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      # Весь проект (DocumentRoot — ./public). Фото лежат в ./public/uploads и
+      # переживают пересборку контейнера, т.к. это обычная папка на хосте.
+      - ./:/var/www/html
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-ads}
+      DB_USER: ${DB_USER:-ads_user}
+      DB_PASS: ${DB_PASS:-ads_pass}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+      APP_DEBUG: ${APP_DEBUG:-0}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mysql:8.0
+    container_name: board-db
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS:-root}
+      MYSQL_DATABASE: ${DB_NAME:-ads}
+      MYSQL_USER: ${DB_USER:-ads_user}
+      MYSQL_PASSWORD: ${DB_PASS:-ads_pass}
+    volumes:
+      - db_data:/var/lib/mysql
+      # *.sql из этой папки выполняются один раз — при первом создании тома db_data
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: board-pma
+    profiles: ["tools"]          # docker compose --profile tools up -d
+    ports:
+      - "${PMA_PORT:-8081}:80"
+    environment:
+      PMA_HOST: db
+    depends_on:
+      - db
+
+volumes:
+  db_data:

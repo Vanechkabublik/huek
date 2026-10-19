@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffa24d"/><stop offset="1" stop-color="#ff4f6d"/></linearGradient></defs>
+<rect width="800" height="600" fill="url(#g)"/>
+<circle cx="110" cy="90" r="170" fill="#fff" fill-opacity=".09"/><circle cx="720" cy="540" r="230" fill="#fff" fill-opacity=".09"/><circle cx="690" cy="80" r="60" fill="#fff" fill-opacity=".08"/>
+<ellipse cx="400" cy="488" rx="210" ry="15" fill="#000" fill-opacity=".12"/>
+<g>
+<rect x="190" y="260" width="100" height="190" rx="12" fill="#fff" fill-opacity=".62"/>
+<rect x="510" y="215" width="100" height="235" rx="12" fill="#fff" fill-opacity=".62"/>
+<rect x="270" y="120" width="260" height="330" rx="16" fill="#fff"/>
+<g fill="#000" fill-opacity=".2">
+<rect x="298" y="150" width="46" height="42" rx="7"/><rect x="377" y="150" width="46" height="42" rx="7"/><rect x="456" y="150" width="46" height="42" rx="7"/>
+<rect x="298" y="212" width="46" height="42" rx="7"/><rect x="456" y="212" width="46" height="42" rx="7"/>
+<rect x="298" y="274" width="46" height="42" rx="7"/><rect x="377" y="274" width="46" height="42" rx="7"/>
+<rect x="298" y="336" width="46" height="42" rx="7"/><rect x="377" y="336" width="46" height="42" rx="7"/><rect x="456" y="336" width="46" height="42" rx="7"/>
+<rect x="212" y="285" width="26" height="30" rx="5"/><rect x="252" y="285" width="26" height="30" rx="5"/><rect x="212" y="345" width="26" height="30" rx="5"/><rect x="252" y="345" width="26" height="30" rx="5"/>
+<rect x="532" y="240" width="26" height="30" rx="5"/><rect x="572" y="240" width="26" height="30" rx="5"/><rect x="532" y="300" width="26" height="30" rx="5"/><rect x="572" y="300" width="26" height="30" rx="5"/>
+</g>
+<g fill="#ffc700"><rect x="377" y="212" width="46" height="42" rx="7"/><rect x="456" y="274" width="46" height="42" rx="7"/></g>
+<rect x="368" y="398" width="64" height="52" rx="10" fill="#000" fill-opacity=".26"/>
+</g>
+</svg>
