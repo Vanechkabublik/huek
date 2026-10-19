@@ -17,7 +17,7 @@ if ($doc === null) {
 
 View::header(['title' => $doc['title'], 'page' => 'legal', 'categories' => false, 'bodyClass' => 'body-soft']);
 ?>
-<main class="container legal">
+<main id="main" class="container legal">
     <article class="legal__card">
         <nav class="legal__tabs" aria-label="Документы">
             <?php foreach (Legal::SLUGS as $s => $title): ?>

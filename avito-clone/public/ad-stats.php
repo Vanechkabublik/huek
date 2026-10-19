@@ -16,7 +16,7 @@ if ($ad === null || (!$ad['is_owner'] && $user['role'] !== 'admin')) {
 
 View::header(['title' => 'Статистика: ' . $ad['title'], 'page' => 'ad-stats', 'categories' => false, 'bodyClass' => 'body-soft']);
 ?>
-<main class="container stats-page" data-ad="<?= $ad['id'] ?>">
+<main id="main" class="container stats-page" data-ad="<?= $ad['id'] ?>">
     <a class="back-link" href="<?= $ad['is_owner'] ? '/my-ads.php' : '/admin.php#/ads' ?>"><?= View::icon('arrow-left') ?>Назад</a>
 
     <div class="stats-head">

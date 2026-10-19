@@ -12,7 +12,7 @@ if (Auth::check()) {
 
 View::header(['title' => 'Регистрация', 'page' => 'register', 'categories' => false, 'bodyClass' => 'body-soft']);
 ?>
-<main class="container auth">
+<main id="main" class="container auth">
     <div class="auth__card">
         <h1>Регистрация</h1>
         <p class="auth__sub">Это займёт меньше минуты</p>

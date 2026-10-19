@@ -19,6 +19,20 @@ if (str_starts_with($path, '/uploads/') && !preg_match('#\.(jpe?g|png|gif|webp|s
     return true;
 }
 
+$public = __DIR__ . '/../../public';
+
+// robots.txt и sitemap.xml формируются на лету (адрес сайта и список объявлений)
+if ($path === '/robots.txt' || $path === '/sitemap.xml') {
+    require $public . ($path === '/robots.txt' ? '/robots.php' : '/sitemap.php');
+    return true;
+}
+
+// Несуществующий адрес — страница «не найдено» с кодом 404 (иначе встроенный сервер отдал бы главную с кодом 200)
+if ($path !== '/' && !is_file($public . $path)) {
+    require $public . '/404.php';
+    return true;
+}
+
 // Видео: встроенный сервер PHP не умеет Range-запросы, без них iPhone не воспроизводит ролик и нельзя перематывать.
 // (За nginx/Caddy файлы из /uploads лучше отдавать самим прокси — см. DEPLOY.md; это запасной путь для разработки.)
 if (preg_match('#^/uploads/(v_[a-f0-9]{24}\.(mp4|mov|webm))$#', $path, $m)) {

@@ -30,7 +30,7 @@ $client = View::clientData($admin);
 <div class="admin">
     <aside class="admin__sidebar" id="adminSidebar">
         <a class="admin__brand" href="/admin.php">
-            <span class="logo__mark">А<i></i></span>
+            <img class="logo__mark" src="/assets/img/logo-mark.svg" width="34" height="34" alt="">
             <span><b>Админ-панель</b><small><?= e(APP_NAME) ?></small></span>
         </a>
         <nav class="admin__nav" aria-label="Разделы админки">
@@ -41,7 +41,7 @@ $client = View::clientData($admin);
             <a href="#/reviews" data-section="reviews"><?= View::icon('star') ?>Отзывы</a>
             <a href="#/audit" data-section="audit"><?= View::icon('file-text') ?>Журнал</a>
             <a href="#/security" data-section="security"><?= View::icon('shield-check') ?>Безопасность</a>
-            <a href="#/legal" data-section="legal"><?= View::icon('file-text') ?>Документы</a>
+            <a href="#/legal" data-section="legal"><?= View::icon('book-open') ?>Документы</a>
             <a href="#/integrations" data-section="integrations"><?= View::icon('settings') ?>Интеграции</a>
         </nav>
         <div class="admin__foot">
@@ -55,7 +55,7 @@ $client = View::clientData($admin);
         </div>
     </aside>
 
-    <main class="admin__main">
+    <main id="main" class="admin__main">
         <div class="admin__content" id="adminContent" aria-live="polite"></div>
     </main>
 </div>

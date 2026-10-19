@@ -10,7 +10,7 @@ Auth::requireLogin();
 
 View::header(['title' => 'Избранное', 'page' => 'favorites', 'categories' => false]);
 ?>
-<main class="container page-my">
+<main id="main" class="container page-my">
     <div class="page-head">
         <div>
             <h1>Избранное</h1>

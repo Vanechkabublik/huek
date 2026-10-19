@@ -26,7 +26,12 @@ final class View
             'bodyClass'   => '',
             'image'       => '',       // картинка для превью ссылки (Open Graph); по умолчанию — логотип
             'noindex'     => false,    // закрыть страницу от поисковиков
+            'canonical'   => '',       // канонический адрес (путь), если страница доступна по нескольким URL
         ];
+        // личные и служебные страницы не нужны поисковикам
+        if (in_array($o['page'], ['login', 'register', 'create-ad', 'profile', 'my-ads', 'favorites', 'chat', 'ad-stats', 'error'], true)) {
+            $o['noindex'] = true;
+        }
         self::$opts = $o;
         $user = Auth::user();
         $unread = $user ? Chat::unreadTotal((int) $user['id']) : 0;

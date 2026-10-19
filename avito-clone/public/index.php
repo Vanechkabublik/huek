@@ -27,7 +27,7 @@ View::header([
     'category' => $f['category'],
 ]);
 ?>
-<main class="container page-index">
+<main id="main" class="container page-index">
     <div class="layout">
         <aside class="filters" id="filters" aria-label="Фильтры">
             <form class="filters__card" id="filtersForm" autocomplete="off">

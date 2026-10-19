@@ -10,7 +10,7 @@ Auth::requireLogin();
 
 View::header(['title' => 'Мои объявления', 'page' => 'my-ads', 'categories' => false]);
 ?>
-<main class="container page-my">
+<main id="main" class="container page-my">
     <div class="page-head">
         <div>
             <h1>Мои объявления</h1>

@@ -323,10 +323,12 @@ input[list]::-webkit-calendar-picker-indicator { display: none !important; }
 /* 5. Шапка ---------------------------------------------------------------------- */
 .header { position: sticky; top: 0; z-index: 50; background: var(--surface); box-shadow: var(--sh-header); }
 .header__inner {
-    display: grid; grid-template-columns: auto auto minmax(200px, 1fr) auto; align-items: center;
+    display: grid; grid-template-columns: auto auto minmax(140px, 1fr) auto; align-items: center;
     gap: 16px 18px; height: var(--header-h);
 }
 
+.header__inner > * { min-width: 0; }
+.header__inner > .header__actions, .header__inner > .logo { min-width: auto; }
 .logo { display: inline-flex; align-items: center; gap: 11px; color: var(--text); font-weight: 800; font-size: 19px; letter-spacing: -0.025em; white-space: nowrap; }
 .logo:hover { color: var(--text); }
 .logo__mark { width: 36px; height: 36px; flex: none; border-radius: 9px; }
@@ -356,6 +358,7 @@ input[list]::-webkit-calendar-picker-indicator { display: none !important; }
     flex: 1; min-width: 0; height: 100%; padding: 0 12px 0 44px; border: 0; background: transparent;
     font: inherit; font-size: 14px; color: var(--text); outline: none;
 }
+.search__btn-icon { display: none; }
 .search__btn { height: calc(100% - 8px); min-height: 0; border-radius: 4px; margin: 0 4px 0 0; padding: 0 20px; }
 
 .header__actions { display: flex; align-items: center; gap: 8px; }
@@ -761,7 +764,7 @@ input[list]::-webkit-calendar-picker-indicator { display: none !important; }
 a.stat:hover { transform: translateY(-3px); box-shadow: var(--sh-card-hover); color: var(--text); }
 .stat__label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 600; font-size: 14px; }
 .stat__label .icon { color: var(--c, var(--blue)); }
-.stat__num { margin-top: 10px; font-size: 48px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--c, var(--blue)); }
+.stat__num { margin-top: 10px; font-size: 48px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--text); }
 .stat--blue { --c: var(--blue); }
 .stat--green { --c: var(--green); }
 .stat--yellow { --c: #f0a800; }
@@ -852,6 +855,8 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
     .ad-grid { grid-template-columns: minmax(0, 1fr) 340px; gap: 12px 28px; }
     .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .header__link--text { display: none; }
+    .header__create-more { display: none; }
+    .city-btn { max-width: 160px; }
 }
 
 @media (max-width: 1023px) {
@@ -881,7 +886,7 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
     .buy-card { padding: 20px; }
     .price-big { font-size: 32px; }
 
-    .header__inner { grid-template-columns: auto 1fr; grid-template-areas: "logo actions" "city search"; height: auto; gap: 10px 12px; padding-top: 10px; padding-bottom: 12px; }
+    .header__inner { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "logo actions" "city search"; height: auto; gap: 10px 12px; padding-top: 10px; padding-bottom: 12px; }
     .logo { grid-area: logo; }
     .header__actions { grid-area: actions; justify-self: end; }
     .city-btn { grid-area: city; height: 44px; max-width: 148px; }
@@ -962,6 +967,10 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 
 @media (max-width: 519px) {
     .container { padding: 0 14px; }
+    .search__btn { padding: 0 12px; }
+    .search__btn-text { display: none; }
+    .search__btn-icon { display: block; }
+    .city-btn { max-width: 128px; padding: 0 10px; }
     .grid, .grid--my { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     /* на узком экране карточка — горизонтальная: фото слева, текст справа */
     .card__link { flex-direction: row; }
@@ -1133,7 +1142,7 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 .tile { padding: 18px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--border-2); box-shadow: var(--sh-card); border-top: 3px solid var(--c, var(--blue)); }
 .tile__label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .tile__label .icon { width: 16px; height: 16px; color: var(--c, var(--blue)); }
-.tile__num { margin-top: 6px; font-size: 36px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: var(--c, var(--blue)); }
+.tile__num { margin-top: 6px; font-size: 36px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: var(--text); }
 .tile__sub { margin-top: 2px; font-size: 12.5px; color: var(--muted); }
 .tile--blue { --c: var(--blue); } .tile--green { --c: var(--green); } .tile--yellow { --c: #f0a800; } .tile--red { --c: var(--red); }
 .panel-card { padding: 20px; margin-bottom: 16px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--sh-card); }
@@ -1225,7 +1234,8 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 .hbar__icon { display: inline-grid; place-items: center; width: 24px; color: var(--muted); }
 .hbar__icon .icon { width: 18px; height: 18px; }
 .hbar b { text-align: right; }
-.mini-list { display: grid; }
+.mini-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+.mini-row__sub { overflow-wrap: anywhere; }
 .mini-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-2); }
 .mini-row:last-child { border-bottom: 0; }
 .mini-row__img { flex: none; width: 52px; height: 40px; border-radius: 8px; overflow: hidden; background: var(--bg-soft); }
@@ -1420,7 +1430,8 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 .choice input:checked + .choice__body > .icon { color: var(--blue-700); }
 .choice input:focus-visible + .choice__body { box-shadow: var(--ring); }
 .choice.is-disabled { opacity: 0.5; cursor: not-allowed; }
-.contact-method { margin-bottom: 18px; }
+.contact-method { margin: 0 0 18px; padding: 0; border: 0; min-width: 0; }
+.contact-method > legend { padding: 0; }
 .contact-hours { margin: 14px 0 0; }
 @media (max-width: 767px) { .choice-grid { grid-template-columns: 1fr; } }
 

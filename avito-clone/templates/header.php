@@ -7,7 +7,7 @@ use App\View;
 
 $isIndex = $o['page'] === 'index';
 $q = $isIndex ? (string) ($_GET['q'] ?? '') : '';
-$cityLabel = $city === null ? 'Выберите город' : ($city === 'all' ? 'Все города' : $city);
+$cityLabel = $city === null ? 'Ваш город' : ($city === 'all' ? 'Все города' : $city);
 $origin = App\OAuth::appUrl();
 $ogImage = $o['image'] !== '' ? $o['image'] : '/icon-512.png';
 ?>
@@ -24,6 +24,10 @@ $ogImage = $o['image'] !== '' ? $o['image'] : '/icon-512.png';
     <meta name="csrf-token" content="<?= e($client['csrf']) ?>">
 <?php if ($o['noindex']): ?>
     <meta name="robots" content="noindex, nofollow">
+<?php endif; ?>
+<?php if ($o['canonical'] !== ''): ?>
+    <link rel="canonical" href="<?= e($origin . $o['canonical']) ?>">
+    <meta property="og:url" content="<?= e($origin . $o['canonical']) ?>">
 <?php endif; ?>
     <meta property="og:site_name" content="<?= e($site) ?>">
     <meta property="og:type" content="website">
@@ -56,8 +60,8 @@ $ogImage = $o['image'] !== '' ? $o['image'] : '/icon-512.png';
         <form class="search" id="searchForm" action="/index.php" method="get" role="search">
             <?= View::icon('search', 'search__icon') ?>
             <input class="search__input" id="searchInput" type="search" name="q" value="<?= e($q) ?>"
-                   placeholder="Поиск по объявлениям" autocomplete="off" aria-label="Поиск объявлений" maxlength="100">
-            <button class="btn btn--primary search__btn" type="submit">Найти</button>
+                   placeholder="Поиск объявлений" autocomplete="off" aria-label="Поиск объявлений" maxlength="100">
+            <button class="btn btn--primary search__btn" type="submit" aria-label="Найти"><span class="search__btn-text">Найти</span><?= View::icon('search', 'search__btn-icon') ?></button>
         </form>
 
         <nav class="header__actions" aria-label="Основная навигация">
@@ -69,7 +73,7 @@ $ogImage = $o['image'] !== '' ? $o['image'] : '/icon-512.png';
                 <?= View::icon('moon', 'theme-toggle__moon') ?><?= View::icon('sun', 'theme-toggle__sun') ?>
             </button>
             <a class="btn btn--primary header__create" href="/create-ad.php">
-                <?= View::icon('plus') ?><span>Разместить объявление</span>
+                <?= View::icon('plus') ?><span>Разместить<span class="header__create-more"> объявление</span></span>
             </a>
 
             <?php if ($user): ?>

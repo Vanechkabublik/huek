@@ -567,7 +567,7 @@
        4c. Город посетителя: выбор вручную и определение по геопозиции из браузера
        ====================================================================== */
 
-    const cityLabel = (c) => (c === null ? 'Выберите город' : c === 'all' ? 'Все города' : c);
+    const cityLabel = (c) => (c === null ? 'Ваш город' : c === 'all' ? 'Все города' : c);
 
     function paintCity() {
         const label = $('#cityLabel');
@@ -703,7 +703,7 @@
         const btn = $('#cityBtn');
         if (!btn) return;
         btn.addEventListener('click', () => { $('.city-hint')?.remove(); openCityPicker(); });
-        if (['index', 'ad', 'favorites', 'seller'].includes(document.body.dataset.page)) setTimeout(showCityHint, 900);
+        if (document.body.dataset.page === 'index') setTimeout(showCityHint, 900);
     }
 
     /* ======================================================================

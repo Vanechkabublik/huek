@@ -17,7 +17,7 @@ unset($_SESSION['flash_ban']);
 
 View::header(['title' => 'Вход', 'page' => 'login', 'categories' => false, 'bodyClass' => 'body-soft']);
 ?>
-<main class="container auth">
+<main id="main" class="container auth">
     <div class="auth__card">
         <h1>Вход</h1>
         <p class="auth__sub">Войдите, чтобы размещать объявления и писать продавцам</p>

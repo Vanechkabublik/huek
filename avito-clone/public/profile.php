@@ -14,7 +14,7 @@ View::header(['title' => 'Профиль и настройки', 'page' => 'prof
 $identities = User::identities((int) $user['id']);
 $enabledProviders = OAuth::enabledProviders();
 ?>
-<main class="container form-page">
+<main id="main" class="container form-page">
     <a class="back-link" href="/seller.php?id=<?= (int) $user['id'] ?>"><?= View::icon('arrow-left') ?>Мой публичный профиль</a>
 
     <div class="form-card">

@@ -47,7 +47,7 @@ View::header([
     'bodyClass'  => 'body-soft',
 ]);
 ?>
-<main class="container form-page">
+<main id="main" class="container form-page">
     <a class="back-link" href="<?= $edit ? '/my-ads.php' : '/index.php' ?>"><?= View::icon('arrow-left') ?>Назад</a>
 
     <div class="form-card" id="adFormCard">

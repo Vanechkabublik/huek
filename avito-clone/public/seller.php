@@ -18,7 +18,7 @@ $isMe  = $me !== null && (int) $me['id'] === $id;
 
 View::header(['title' => $seller['name'], 'page' => 'seller', 'categories' => false, 'description' => 'Профиль продавца ' . $seller['name'] . ': объявления и отзывы']);
 ?>
-<main class="container seller-page" data-seller="<?= $id ?>" data-me="<?= $me ? (int) $me['id'] : 0 ?>">
+<main id="main" class="container seller-page" data-seller="<?= $id ?>" data-me="<?= $me ? (int) $me['id'] : 0 ?>">
     <section class="profile-head">
         <?= View::avatar(['name' => $seller['name'], 'avatar' => $seller['avatar']], 'avatar--xl') ?>
         <div class="profile-head__info">

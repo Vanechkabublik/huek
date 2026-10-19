@@ -34,9 +34,12 @@ View::header([
     'page'        => 'ad',
     'category'    => (int) $ad['category_id'],
     'description' => mb_substr(preg_replace('/\s+/u', ' ', $ad['description']), 0, 160),
+    'image'       => $images[0]['url'] ?? '',
+    'canonical'   => '/ad.php?id=' . $ad['id'],
+    'noindex'     => $ad['status'] !== 'approved',
 ]);
 ?>
-<main class="container ad-page" data-ad-id="<?= $ad['id'] ?>" data-category="<?= (int) $ad['category_id'] ?>">
+<main id="main" class="container ad-page" data-ad-id="<?= $ad['id'] ?>" data-category="<?= (int) $ad['category_id'] ?>">
     <nav class="breadcrumbs" aria-label="Хлебные крошки">
         <a href="/index.php">Главная</a>
         <?= View::icon('chevron-right') ?>
