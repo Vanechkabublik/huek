@@ -78,9 +78,9 @@ final class Auth
 
         // password_verify вызываем всегда — чтобы время ответа не выдавало, существует ли email
         $hash = $row['password_hash'] ?? self::DUMMY_HASH;
-        $valid = password_verify($password, $hash);
+        $valid = password_verify($password, $hash) && $row !== null && $row['password_hash'] !== null;
 
-        if ($row === null || !$valid) {
+        if (!$valid) {
             throw new HttpException('Неверный email или пароль', 401, ['password' => 'Неверный email или пароль']);
         }
         if ((int) $row['is_blocked'] === 1) {
@@ -99,6 +99,7 @@ final class Auth
     {
         session_regenerate_id(true);          // защита от фиксации сессии
         $_SESSION['uid'] = $userId;
+        User::touchLogin($userId);
         Csrf::rotate();
         self::$loaded = false;
         self::$user = null;

@@ -1,13 +1,15 @@
 /* ==========================================================================
-   Авито-клон — клиентская логика (vanilla JS, fetch)
+   Авито-клон — клиентская логика (vanilla JS, fetch, WebSocket)
 
    1. Утилиты и DOM-хелперы      6. Страница объявления
    2. API-клиент                 7. Вход / регистрация
    3. UI: тосты, модалки         8. Создание / редактирование объявления
-   4. Шапка                      9. Мои объявления, сообщения
-   5. Карточки и главная        10. Админ-панель
+   4. Шапка, тема, избранное,    9. Мои объявления, избранное, профиль продавца,
+      realtime, города, графики     настройки, статистика объявления
+   5. Карточки и главная
 
-   Весь пользовательский текст попадает в DOM через textContent / createElement —
+   Страницы чата и админки живут в отдельных файлах (chat.js, admin.js) и берут помощники
+   из window.Board. Весь пользовательский текст попадает в DOM через textContent / createElement —
    innerHTML не используется, поэтому XSS через данные объявлений невозможен.
    ========================================================================== */
 (() => {
@@ -146,7 +148,7 @@
     /** Всплывающее уведомление сверху справа; исчезает через 3 секунды. */
     function toast(message, type = 'success', ms = 3000) {
         const root = $('#toasts');
-        if (!root) return;
+        if (!root) return null;
         const node = el('div', { class: `toast toast--${type}`, role: 'status' }, icon(TOAST_ICONS[type] || 'alert-circle'), el('span', {}, message));
         root.append(node);
         while (root.children.length > 4) root.firstElementChild.remove();
@@ -156,6 +158,7 @@
         };
         const timer = setTimeout(hide, ms);
         node.addEventListener('click', () => { clearTimeout(timer); hide(); });
+        return node;
     }
 
     function setLoading(btn, on) {
@@ -225,13 +228,13 @@
      * false — если закрыли крестиком/Esc/кликом по фону.
      * onSubmit(form) может бросить ApiError — тогда ошибки покажутся под полями, окно останется открытым.
      */
-    function openModal({ title, text = '', content = null, submitText = 'Подтвердить', cancelText = 'Отмена', danger = false, hideCancel = false, submitKind = '', onSubmit = null }) {
+    function openModal({ title, text = '', content = null, submitText = 'Подтвердить', cancelText = 'Отмена', danger = false, hideCancel = false, submitKind = '', modalClass = '', onSubmit = null }) {
         return new Promise((resolve) => {
             const root = $('#modalRoot');
             const overlay = el('div', { class: 'modal-overlay', role: 'dialog', 'aria-modal': 'true', 'aria-label': title });
             const cancelBtn = el('button', { type: 'button', class: 'btn btn--outline' }, cancelText);
             const submitBtn = el('button', { type: 'submit', class: `btn ${submitKind || (danger ? 'btn--danger' : 'btn--primary')}` }, submitText);
-            const form = el('form', { class: 'modal', novalidate: true },
+            const form = el('form', { class: `modal${modalClass ? ' ' + modalClass : ''}`, novalidate: true },
                 el('h3', { class: 'modal__title' }, title),
                 text ? el('p', { class: 'modal__text' }, text) : null,
                 content,
@@ -239,7 +242,11 @@
             overlay.append(form);
 
             let closed = false;
-            const onKey = (e) => { if (e.key === 'Escape') close(false); };
+            const onKey = (e) => {
+                // Esc закрывает только верхнее из открытых окон
+                const open = $$('.modal-overlay.is-open');
+                if (e.key === 'Escape' && open[open.length - 1] === overlay) close(false);
+            };
             function close(result) {
                 if (closed) return;
                 closed = true;
@@ -298,8 +305,73 @@
     }
 
     /* ======================================================================
-       4. Шапка: меню пользователя, выход
+       4. Шапка: меню, выход, тема, избранное, realtime-бейдж
        ====================================================================== */
+
+    /** Применяет тему оформления (светлая/тёмная) и запоминает выбор. */
+    function applyTheme(theme, save = true) {
+        document.documentElement.setAttribute('data-theme', theme);
+        const meta = $('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#0f1318' : '#00aaff');
+        if (save) {
+            try { localStorage.setItem('theme', theme); } catch { /* приватный режим */ }
+        }
+    }
+
+    function initTheme() {
+        $$('#themeToggle').forEach((btn) => btn.addEventListener('click', () => {
+            const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+            applyTheme(dark ? 'light' : 'dark');
+        }));
+        // Если пользователь не выбирал тему вручную — следуем за системной
+        try {
+            const mq = window.matchMedia('(prefers-color-scheme: dark)');
+            mq.addEventListener('change', (e) => { if (!localStorage.getItem('theme')) applyTheme(e.matches ? 'dark' : 'light', false); });
+        } catch { /* старые браузеры */ }
+        applyTheme(document.documentElement.getAttribute('data-theme') || 'light', false);
+    }
+
+    /** Сердечко «в избранное»: серверная и клиентская кнопки помечаются атрибутом data-fav-ad. */
+    function favBtn(adId, active, large = false) {
+        return el('button', {
+            type: 'button', class: `fav-btn${large ? ' fav-btn--lg' : ''}${active ? ' is-active' : ''}`,
+            'data-fav-ad': adId, 'aria-pressed': String(Boolean(active)), title: 'В избранное', 'aria-label': 'В избранное',
+        }, icon('heart'));
+    }
+
+    function setFavState(adId, on, animate = false) {
+        $$(`[data-fav-ad="${adId}"]`).forEach((b) => {
+            b.classList.toggle('is-active', on);
+            b.setAttribute('aria-pressed', String(on));
+            if (animate && on) { b.classList.remove('is-pop'); void b.offsetWidth; b.classList.add('is-pop'); }
+        });
+    }
+
+    function initFavoriteClicks() {
+        document.addEventListener('click', async (e) => {
+            const btn = e.target.closest('[data-fav-ad]');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (!APP.user) {
+                toast('Войдите, чтобы добавлять в избранное', 'info');
+                setTimeout(() => (location.href = '/login.php?next=' + encodeURIComponent(location.pathname + location.search)), 800);
+                return;
+            }
+            const id = Number(btn.dataset.favAd);
+            const was = btn.classList.contains('is-active');
+            setFavState(id, !was, true);                       // оптимистично
+            try {
+                const res = await apiPost('favorites', 'toggle', { ad_id: id });
+                setFavState(id, res.is_favorite);
+                toast(res.is_favorite ? 'Добавлено в избранное' : 'Убрано из избранного', 'success', 1800);
+                document.dispatchEvent(new CustomEvent('fav:changed', { detail: { id, active: res.is_favorite } }));
+            } catch (err) {
+                setFavState(id, was);
+                handleApiError(err);
+            }
+        });
+    }
 
     function initHeader() {
         const menu = $('#userMenu');
@@ -322,6 +394,216 @@
                 location.href = '/login.php';
             });
         });
+
+        initTheme();
+        initFavoriteClicks();
+
+        // Одноразовые сообщения после редиректов (вход через VK, профиль и т. п.)
+        if (APP.flash && APP.flash.error) toast(APP.flash.error, 'error', 5000);
+        if (APP.flash && APP.flash.ok) toast(APP.flash.ok, 'success', 3500);
+    }
+
+    /* ======================================================================
+       4b. Realtime: WebSocket с автопереподключением (события чата)
+       ====================================================================== */
+
+    const realtime = (() => {
+        const handlers = {};
+        let ws = null;
+        let open = false;
+        let attempt = 0;
+        let pingTimer = null;
+        let reconnectTimer = null;
+        const baseTitle = document.title;
+
+        const on = (type, fn) => { (handlers[type] ||= []).push(fn); };
+        const emit = (type, data) => (handlers[type] || []).forEach((fn) => { try { fn(data); } catch (e) { console.error(e); } });
+
+        function setBadge(count) {
+            const n = Number(count) || 0;
+            const text = n > 9 ? '9+' : String(n);
+            ['chatBadge', 'chatBadgeMobile'].forEach((id) => {
+                const b = document.getElementById(id);
+                if (b) { b.textContent = text; b.hidden = n === 0; }
+            });
+            const m = document.getElementById('menuChatCount');
+            if (m) { m.textContent = String(n); m.hidden = n === 0; }
+            document.title = (n > 0 ? `(${n}) ` : '') + baseTitle.replace(/^\(\d+\)\s*/, '');
+        }
+
+        async function connect() {
+            if (!APP.user || ws) return;
+            try {
+                const { ticket, url, port } = await apiGet('chat', { action: 'ticket' });
+                const base = url || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${port}`;
+                ws = new WebSocket(`${base}${base.includes('?') ? '&' : '?'}ticket=${encodeURIComponent(ticket)}`);
+            } catch {
+                scheduleReconnect();
+                return;
+            }
+            ws.onopen = () => {
+                open = true;
+                attempt = 0;
+                clearInterval(pingTimer);
+                pingTimer = setInterval(() => send({ t: 'ping' }), 25000);
+                emit('open', {});
+            };
+            ws.onmessage = (ev) => {
+                let msg;
+                try { msg = JSON.parse(ev.data); } catch { return; }
+                if (msg.t === 'hello') setBadge(msg.unread);
+                if (msg.t === 'unread') setBadge(msg.count);
+                emit(msg.t, msg);
+            };
+            ws.onclose = () => {
+                const wasOpen = open;
+                open = false;
+                ws = null;
+                clearInterval(pingTimer);
+                if (wasOpen) emit('close', {});
+                scheduleReconnect();
+            };
+            ws.onerror = () => { try { ws && ws.close(); } catch { /* уже закрыт */ } };
+        }
+
+        function scheduleReconnect() {
+            clearTimeout(reconnectTimer);
+            attempt += 1;
+            const delay = Math.min(30000, 1000 * 2 ** Math.min(attempt, 5)) + Math.random() * 500;
+            reconnectTimer = setTimeout(connect, delay);
+            if (attempt === 2) emit('close', {});          // WebSocket недоступен — страницы могут включить опрос
+        }
+
+        function send(obj) {
+            if (ws && open) { ws.send(JSON.stringify(obj)); return true; }
+            return false;
+        }
+
+        function start() {
+            if (!APP.user) return;
+            connect();
+            // Реакция на новые сообщения вне страницы чата: всплывающее уведомление
+            on('message', (m) => {
+                if (document.body.dataset.page === 'chat' || m.message.sender_id === APP.user.id) return;
+                const who = m.conversation && m.conversation.peer ? m.conversation.peer.name : 'Новое сообщение';
+                const t = toast(`${who}: ${m.message.body.slice(0, 80)}`, 'info', 5000);
+                if (t) { t.style.cursor = 'pointer'; t.addEventListener('click', () => (location.href = `/chat.php?c=${m.message.conversation_id}`)); }
+            });
+            document.addEventListener('visibilitychange', () => { if (!document.hidden && !ws) { attempt = 0; connect(); } });
+        }
+
+        return { on, send, start, setBadge, get isOpen() { return open; } };
+    })();
+
+    /* ======================================================================
+       4c. Подсказки городов (список лежит в assets/data/cities.json)
+       ====================================================================== */
+
+    let citiesPromise = null;
+    const loadCities = () => (citiesPromise ||= fetch('/assets/data/cities.json').then((r) => r.json()).catch(() => []));
+
+    /** Выпадающий список подсказок под полем ввода: ↑↓ Enter Esc, подсветка совпадения. */
+    function attachCityAutocomplete(input, known = []) {
+        const wrap = el('div', { class: 'suggest' });
+        input.parentNode.insertBefore(wrap, input);
+        wrap.append(input);
+        const list = el('div', { class: 'suggest__list', role: 'listbox', hidden: true });
+        wrap.append(list);
+        let items = [];
+        let active = -1;
+
+        const norm = (s) => s.toLowerCase().replaceAll('ё', 'е');
+        const close = () => { list.hidden = true; active = -1; };
+        const pick = (name) => { input.value = name; input.dispatchEvent(new Event('input', { bubbles: true })); close(); };
+        const highlight = () => $$('.suggest__item', list).forEach((n, i) => {
+            n.classList.toggle('is-active', i === active);
+            if (i === active) n.scrollIntoView({ block: 'nearest' });
+        });
+
+        async function render() {
+            const q = norm(input.value.trim());
+            const all = await loadCities();
+            const knownSet = new Set(known);
+            const pool = [...known, ...all.filter((c) => !knownSet.has(c))];
+            const starts = pool.filter((c) => norm(c).startsWith(q));
+            const contains = pool.filter((c) => !norm(c).startsWith(q) && norm(c).includes(q));
+            items = (q ? [...starts, ...contains] : pool).slice(0, 8);
+            list.replaceChildren(...items.map((name) => {
+                const row = el('div', { class: 'suggest__item', role: 'option' });
+                const i = norm(name).indexOf(q);
+                if (q && i >= 0) row.append(name.slice(0, i), el('mark', {}, name.slice(i, i + q.length)), name.slice(i + q.length));
+                else row.append(name);
+                if (knownSet.has(name)) row.append(el('small', {}, 'есть объявления'));
+                row.addEventListener('mousedown', (e) => { e.preventDefault(); pick(name); });
+                return row;
+            }));
+            list.hidden = items.length === 0;
+            active = -1;
+        }
+
+        input.addEventListener('input', render);
+        input.addEventListener('focus', render);
+        input.addEventListener('blur', () => setTimeout(close, 120));
+        input.addEventListener('keydown', (e) => {
+            if (list.hidden) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; highlight(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; highlight(); }
+            else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); pick(items[active]); }
+            else if (e.key === 'Escape') close();
+        });
+    }
+
+    /* ======================================================================
+       4d. Графики (SVG без библиотек)
+       ====================================================================== */
+
+    /**
+     * Столбчатая диаграмма. days: [{label, <series.key>: число}], series: [{key, label, color}].
+     * Несколько серий рисуются сгруппированными столбцами.
+     */
+    function barChart(days, series, { height = 220, width = 720 } = {}) {
+        const W = width;
+        const m = { l: 34, r: 8, t: 10, b: 28 };
+        const plotW = W - m.l - m.r;
+        const plotH = height - m.t - m.b;
+        const rawMax = Math.max(1, ...days.flatMap((d) => series.map((s) => d[s.key] || 0)));
+        const step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000].find((s) => rawMax / s <= 4) || Math.ceil(rawMax / 4);
+        const max = Math.ceil(rawMax / step) * step;
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('viewBox', `0 0 ${W} ${height}`);
+        svg.setAttribute('role', 'img');
+        const add = (name, attrs, text) => {
+            const n = document.createElementNS(SVG_NS, name);
+            for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+            if (text !== undefined) n.textContent = text;
+            svg.append(n);
+            return n;
+        };
+        for (let v = 0; v <= max; v += step) {
+            const y = m.t + plotH - (v / max) * plotH;
+            add('line', { x1: m.l, x2: W - m.r, y1: y, y2: y, class: 'grid-line' });
+            add('text', { x: m.l - 6, y: y + 4, 'text-anchor': 'end' }, String(v));
+        }
+        const group = plotW / days.length;
+        const barW = Math.min(26, (group * 0.72) / series.length);
+        days.forEach((d, i) => {
+            const gx = m.l + i * group + (group - barW * series.length) / 2;
+            series.forEach((s, j) => {
+                const val = d[s.key] || 0;
+                const h = (val / max) * plotH;
+                const rect = add('rect', {
+                    x: gx + j * barW, y: m.t + plotH - h, width: Math.max(2, barW - 2), height: Math.max(h, val > 0 ? 2 : 0), rx: 3, class: 'bar',
+                });
+                rect.style.fill = s.color;
+                const title = document.createElementNS(SVG_NS, 'title');
+                title.textContent = `${d.label}: ${s.label} — ${val}`;
+                rect.append(title);
+            });
+            if (days.length <= 8 || i % 2 === 0 || i === days.length - 1) {
+                add('text', { x: m.l + i * group + group / 2, y: height - 8, 'text-anchor': 'middle' }, d.label);
+            }
+        });
+        return svg;
     }
 
     /* ======================================================================
@@ -329,7 +611,7 @@
        ====================================================================== */
 
     /**
-     * Карточка объявления. owner = true добавляет бейдж статуса, причину и кнопки управления.
+     * Карточка объявления. owner = true добавляет бейдж статуса, причину, статистику и кнопки управления.
      */
     function adCard(ad, { owner = false, index = 0, onDelete = null } = {}) {
         const media = el('div', { class: 'card__media' });
@@ -347,8 +629,11 @@
                 media,
                 el('div', { class: 'card__body' },
                     el('h3', { class: 'card__title' }, ad.title),
+                    ad.specs ? el('div', { class: 'card__specs' }, ad.specs) : null,
                     el('div', { class: 'card__price' }, ad.price_text),
                     el('div', { class: 'card__meta' }, ad.city, el('br'), ad.date_text))));
+
+        if (!owner && ad.status === 'approved') card.append(favBtn(ad.id, ad.is_favorite));
 
         if (owner) {
             if (ad.status === 'rejected' || ad.status === 'blocked') {
@@ -358,11 +643,15 @@
             } else if (ad.status === 'pending') {
                 card.append(el('div', { class: 'card__reason card__reason--pending' }, 'Объявление проверяет модератор — обычно это занимает до нескольких часов.'));
             }
+            card.append(el('div', { class: 'card__reason card__reason--stat' },
+                el('span', {}, icon('eye'), ` ${ad.views}`),
+                el('span', {}, icon('heart'), ` ${ad.fav_count || 0}`)));
             const actions = el('div', { class: 'card__actions' });
             if (ad.status !== 'blocked') {
-                actions.append(el('a', { class: 'btn btn--outline btn--sm', href: `/create-ad.php?id=${ad.id}` }, icon('edit'), 'Редактировать'));
+                actions.append(el('a', { class: 'btn btn--outline btn--sm', href: `/create-ad.php?id=${ad.id}` }, icon('edit'), 'Изменить'));
             }
-            actions.append(el('button', { type: 'button', class: 'btn btn--outline btn--sm btn--danger-text', onClick: () => onDelete && onDelete(ad, card) }, icon('trash'), 'Удалить'));
+            actions.append(el('a', { class: 'btn btn--outline btn--sm', href: `/ad-stats.php?id=${ad.id}` }, icon('trending'), 'Статистика'));
+            actions.append(el('button', { type: 'button', class: 'btn btn--outline btn--sm btn--danger-text', 'aria-label': 'Удалить', onClick: () => onDelete && onDelete(ad, card) }, icon('trash')));
             card.append(actions);
         }
         return card;
@@ -387,8 +676,8 @@
             action);
     }
 
-    /** Главная: фильтры, поиск с debounce, «Показать ещё». Состояние живёт в URL. */
-    function initIndex() {
+    /** Главная: фильтры (включая характеристики категории), поиск с debounce, «Показать ещё». Состояние живёт в URL. */
+    async function initIndex() {
         const form = $('#filtersForm');
         const grid = $('#adsGrid');
         const searchInput = $('#searchInput');
@@ -397,9 +686,42 @@
         const loadMoreBtn = $('#loadMore');
         const filters = $('#filters');
         const overlay = $('#sheetOverlay');
+        const attrBox = $('#attrFilters');
         const state = { page: 1, token: 0 };
 
         const categoryNames = Object.fromEntries($$('#fCategory option').map((o) => [o.value, o.textContent.replace(/^\S+\s/, '')]));
+        let attrDefs = {};                                            // id категории → определения характеристик
+        try {
+            const meta = await apiGet('listings', { action: 'meta' });
+            attrDefs = Object.fromEntries(meta.categories.map((c) => [String(c.id), (c.attributes || []).filter((a) => a.filterable)]));
+        } catch { /* без фильтров по характеристикам сайт всё равно работает */ }
+
+        /** Рисует поля фильтров по характеристикам выбранной категории. */
+        function renderAttrFilters(catId, values = {}) {
+            const defs = attrDefs[String(catId)] || [];
+            attrBox.replaceChildren();
+            if (!defs.length) return;
+            attrBox.append(el('div', { class: 'filters__section-title' }, 'Характеристики'));
+            for (const d of defs) {
+                const unit = d.unit ? `, ${d.unit}` : '';
+                if (d.type === 'number') {
+                    attrBox.append(el('div', { class: 'field' },
+                        el('span', { class: 'field__label' }, d.label + unit),
+                        el('div', { class: 'range' },
+                            el('input', { class: 'input', type: 'number', min: d.min ?? '', max: d.max ?? '', inputmode: 'numeric', name: `a_${d.code}_min`, placeholder: 'от', value: values[`a_${d.code}_min`] ?? '', 'aria-label': `${d.label} от` }),
+                            el('span', { class: 'range__dash' }, '—'),
+                            el('input', { class: 'input', type: 'number', min: d.min ?? '', max: d.max ?? '', inputmode: 'numeric', name: `a_${d.code}_max`, placeholder: 'до', value: values[`a_${d.code}_max`] ?? '', 'aria-label': `${d.label} до` }))));
+                } else {
+                    const select = el('select', { class: 'select', name: `a_${d.code}`, 'aria-label': d.label },
+                        el('option', { value: '' }, 'Любой'),
+                        ...d.options.map((o) => el('option', { value: o }, o)));
+                    select.value = values[`a_${d.code}`] ?? '';
+                    attrBox.append(el('div', { class: 'field' }, el('label', { class: 'field__label' }, d.label), select));
+                }
+            }
+        }
+
+        const readAttrs = () => Object.fromEntries($$('[name]', attrBox).map((n) => [n.name, n.value.trim()]).filter(([, v]) => v !== ''));
 
         const readParams = () => {
             const fd = new FormData(form);
@@ -411,6 +733,7 @@
                 price_max: fd.get('price_max'),
                 sort: fd.get('sort') === 'date' ? '' : fd.get('sort'),
                 user: fd.get('user'),
+                ...readAttrs(),
             };
         };
 
@@ -487,6 +810,7 @@
             form.elements.user.value = '';
             form.elements.sort.value = 'date';
             searchInput.value = '';
+            attrBox.replaceChildren();
             $('#sellerBanner')?.remove();
             setSheet(false);
             load();
@@ -495,7 +819,7 @@
         // фильтры
         form.addEventListener('submit', (e) => { e.preventDefault(); setSheet(false); load(); });
         $('#filtersReset').addEventListener('click', reset);
-        form.elements.category.addEventListener('change', syncChips);
+        form.elements.category.addEventListener('change', () => { renderAttrFilters(form.elements.category.value); syncChips(); });
 
         // поиск: живой (debounce 300 мс) и по Enter
         const liveSearch = debounce(() => load(), 300);
@@ -508,6 +832,7 @@
             if (!chip) return;
             e.preventDefault();
             form.elements.category.value = chip.dataset.category;
+            renderAttrFilters(chip.dataset.category);
             load();
         });
 
@@ -518,6 +843,8 @@
         $('#filtersClose').addEventListener('click', () => setSheet(false));
         overlay.addEventListener('click', () => setSheet(false));
 
+        // Начальное состояние характеристик берём из URL (?category=1&a_year_min=2015…)
+        renderAttrFilters(form.elements.category.value, Object.fromEntries(new URLSearchParams(location.search)));
         load();
     }
 
@@ -531,7 +858,7 @@
 
         initGallery();
 
-        // --- телефон
+        // --- телефон (один раз на человека: повторный показ не раздувает статистику)
         const phoneBtn = $('#showPhoneBtn');
         if (phoneBtn) {
             phoneBtn.addEventListener('click', async () => {
@@ -549,19 +876,6 @@
                     phoneBtn.classList.add('is-revealed');
                     phoneBtn.replaceChildren(icon('phone'), el('span', {}, res.phone));
                 });
-            });
-        }
-
-        // --- сообщение
-        const writeBtn = $('#writeBtn');
-        if (writeBtn) {
-            writeBtn.addEventListener('click', () => {
-                if (!APP.user) {
-                    toast('Войдите, чтобы написать продавцу', 'info');
-                    setTimeout(() => (location.href = '/login.php?next=' + encodeURIComponent(location.pathname + location.search)), 800);
-                    return;
-                }
-                sendMessageModal({ adId, title: 'Сообщение продавцу' });
             });
         }
 
@@ -604,22 +918,6 @@
                 })
                 .catch(() => { /* блок необязательный */ });
         }
-    }
-
-    /** Модалка «Написать сообщение» (покупатель → продавец или ответ владельца). */
-    function sendMessageModal({ adId, toUserId = 0, title }) {
-        return openModal({
-            title,
-            text: 'Продавец увидит сообщение в разделе «Сообщения».',
-            submitText: 'Отправить',
-            content: field({ name: 'body', rows: 4, maxlength: 2000, placeholder: 'Здравствуйте! Объявление ещё актуально?' }),
-            onSubmit: async (form) => {
-                const body = form.elements.body.value.trim();
-                if (body.length < 2) throw new ApiError('', 422, { body: 'Введите текст сообщения' });
-                await apiPost('messages', 'send', { ad_id: adId, to_user_id: toUserId, body });
-                toast('Сообщение отправлено');
-            },
-        });
     }
 
     /** Галерея: scroll-snap карусель + миниатюры + полноэкранный просмотр. */
@@ -758,7 +1056,7 @@
     const MAX_BYTES = 5 * 1024 * 1024;
     const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
-    function initCreateAd() {
+    async function initCreateAd() {
         const form = $('#adForm');
         const initial = JSON.parse(form.dataset.form);
         const isEdit = initial.id > 0;
@@ -766,6 +1064,8 @@
         const fileInput = $('#fileInput');
         const previews = $('#previews');
         const submitBtn = $('#submitBtn');
+        const attrBox = $('#attrBox');
+        const attrFields = $('#attrFields');
 
         /** Фото: {key, filename, url, status: 'uploading'|'ready'|'error', existing} */
         let images = initial.images.map((i, n) => ({ key: 'e' + n, filename: i.filename, url: i.url, status: 'ready', existing: true }));
@@ -777,6 +1077,51 @@
         form.elements.price.value = initial.price !== '' ? formatPrice(initial.price) : '';
         form.elements.city.value = initial.city;
         form.elements.description.value = initial.description;
+
+        // --- подсказки городов
+        const cityInput = form.elements.city;
+        let known = [];
+        try { known = JSON.parse(cityInput.dataset.knownCities || '[]'); } catch { /* нет подсказок из БД */ }
+        attachCityAutocomplete(cityInput, known);
+
+        // --- характеристики зависят от категории
+        let categories = [];
+        try { categories = (await apiGet('listings', { action: 'meta' })).categories; } catch { /* форма работает и без них */ }
+        let attrValues = { ...(initial.attributes || {}) };
+
+        function currentAttrValues() {
+            const out = {};
+            $$('[name^="attr_"]', attrFields).forEach((n) => { out[n.name.slice(5)] = n.value; });
+            return out;
+        }
+
+        function renderAttrFields() {
+            const cat = categories.find((c) => String(c.id) === form.elements.category_id.value);
+            const defs = cat ? cat.attributes || [] : [];
+            attrValues = { ...attrValues, ...currentAttrValues() };
+            attrFields.replaceChildren();
+            attrBox.hidden = defs.length === 0;
+            if (!defs.length) return;
+            $('#attrTitle').textContent = `Характеристики: ${cat.name}`;
+            for (const d of defs) {
+                const name = `attr_${d.code}`;
+                let control;
+                if (d.type === 'select') {
+                    control = el('select', { class: 'select', name },
+                        el('option', { value: '' }, 'Не выбрано'),
+                        ...d.options.map((o) => el('option', { value: o }, o)));
+                } else if (d.type === 'number') {
+                    control = el('input', { class: 'input', name, type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: d.min !== null && d.max !== null ? `${d.min}–${d.max}` : '' });
+                } else {
+                    control = el('input', { class: 'input', name, type: 'text', maxlength: 100, autocomplete: 'off' });
+                }
+                if (attrValues[d.code] !== undefined) control.value = attrValues[d.code];
+                const label = el('label', { class: 'field__label' }, d.label, d.unit ? ` (${d.unit})` : '', d.required ? el('span', { class: 'req' }, ' *') : null);
+                attrFields.append(el('div', { class: 'field' }, label, control, el('p', { class: 'field__error', 'data-error-for': name })));
+            }
+        }
+        form.elements.category_id.addEventListener('change', renderAttrFields);
+        renderAttrFields();
 
         // --- счётчики символов
         $$('[data-counter-for]').forEach((c) => {
@@ -865,6 +1210,7 @@
                 price: form.elements.price.value.replace(/\D/g, ''),
                 city: form.elements.city.value.trim(),
                 description: form.elements.description.value.trim(),
+                attributes: currentAttrValues(),
             };
 
             const errors = {};
@@ -874,6 +1220,10 @@
             if (data.city.length < 2) errors.city = 'Укажите город';
             if (data.description.length < 20) errors.description = data.description ? 'Описание: минимум 20 символов' : 'Опишите товар или услугу';
             if (!images.some((i) => i.status === 'ready')) errors.images = 'Добавьте хотя бы одно фото';
+            const cat = categories.find((c) => String(c.id) === data.category_id);
+            for (const d of (cat ? cat.attributes || [] : [])) {
+                if (d.required && !String(data.attributes[d.code] ?? '').trim()) errors[`attr_${d.code}`] = `Заполните поле «${d.label}»`;
+            }
             if (Object.keys(errors).length) { showErrors(form, errors); return; }
 
             if (images.some((i) => i.status === 'uploading')) {
@@ -911,7 +1261,7 @@
     }
 
     /* ======================================================================
-       9. Мои объявления и сообщения
+       9. Мои объявления, избранное, профиль продавца, настройки, статистика
        ====================================================================== */
 
     function initMyAds() {
@@ -968,436 +1318,294 @@
         load();
     }
 
-    function initMessages() {
-        const list = $('#msgList');
-        const tabs = $$('#msgTabs .tab');
-        let box = 'in';
-        let token = 0;
+    /** Страница «Избранное». */
+    function initFavorites() {
+        const grid = $('#favGrid');
+        const moreBox = $('#favMoreBox');
+        const moreBtn = $('#favMore');
+        let page = 1;
+        let total = 0;
 
-        async function load() {
-            const my = ++token;
-            list.replaceChildren(el('div', { class: 'sk', style: { height: '84px', borderRadius: '12px' } }), el('div', { class: 'sk', style: { height: '84px', borderRadius: '12px' } }));
+        const setCount = () => {
+            $('#favCount').textContent = total ? `${total} ${plural(total, 'объявление', 'объявления', 'объявлений')}` : 'Пока пусто';
+        };
+        const empty = () => grid.replaceChildren(emptyState({
+            emoji: '💙', title: 'В избранном пока ничего нет',
+            text: 'Нажимайте на сердечко у объявлений, чтобы не потерять их.',
+            action: el('a', { class: 'btn btn--primary btn--lg', href: '/index.php' }, 'Смотреть объявления'),
+        }));
+
+        async function load(append = false) {
+            if (!append) grid.replaceChildren(...skeletonCards(4));
             try {
-                const data = await apiGet('messages', { action: 'inbox', box });
-                if (my !== token) return;
-                if (!data.items.length) {
-                    list.replaceChildren(emptyState({
-                        emoji: box === 'in' ? '📬' : '✉️',
-                        title: box === 'in' ? 'Входящих сообщений нет' : 'Вы ещё никому не писали',
-                        text: box === 'in' ? 'Когда покупатель напишет по вашему объявлению, сообщение появится здесь.' : 'Нажмите «Написать сообщение» на странице любого объявления.',
-                    }));
-                    return;
-                }
-                list.replaceChildren(...data.items.map(messageRow));
+                const data = await apiGet('favorites', { action: 'list', page });
+                total = data.total;
+                if (!append) grid.replaceChildren();
+                if (!data.items.length && !append) { empty(); setCount(); moreBox.hidden = true; return; }
+                data.items.forEach((ad, i) => grid.append(adCard(ad, { index: i })));
+                moreBox.hidden = !data.has_more;
+                setCount();
             } catch (err) {
-                if (my === token) list.replaceChildren(emptyState({ emoji: '😵', title: 'Не удалось загрузить', text: err.message }));
+                handleApiError(err);
+            } finally {
+                setLoading(moreBtn, false);
             }
         }
+        moreBtn.addEventListener('click', () => { page += 1; setLoading(moreBtn, true); load(true); });
 
-        function messageRow(m) {
-            return el('article', { class: `msg${box === 'in' && !m.is_read ? ' is-unread' : ''}` },
-                el('span', { class: 'avatar' }, (m.peer_name || '?').charAt(0).toUpperCase()),
-                el('div', { class: 'msg__body' },
-                    el('div', { class: 'msg__top' },
-                        el('strong', {}, (box === 'in' ? 'От: ' : 'Кому: ') + m.peer_name),
-                        el('a', { class: 'msg__ad', href: m.ad_url }, m.ad_title),
-                        el('span', { class: 'msg__date' }, m.date_text)),
-                    el('p', { class: 'msg__text' }, m.body)),
-                m.can_reply ? el('button', {
-                    class: 'btn btn--outline btn--sm', type: 'button',
-                    onClick: () => sendMessageModal({ adId: m.ad_id, toUserId: m.peer_id, title: `Ответ: ${m.peer_name}` }),
-                }, icon('message'), 'Ответить') : null);
-        }
-
-        tabs.forEach((tab) => tab.addEventListener('click', () => {
-            tabs.forEach((t) => t.classList.toggle('is-active', t === tab));
-            box = tab.dataset.box;
-            load();
-        }));
+        // Убрали сердечко — карточка исчезает со страницы
+        document.addEventListener('fav:changed', (e) => {
+            if (e.detail.active) return;
+            const btn = $(`[data-fav-ad="${e.detail.id}"]`);
+            const card = btn && btn.closest('.card');
+            if (card) { card.remove(); total = Math.max(0, total - 1); setCount(); if (!grid.children.length) empty(); }
+        });
         load();
     }
 
-    /* ======================================================================
-       10. Админ-панель
-       ====================================================================== */
+    const starsRow = (n) => el('span', { class: 'stars', 'aria-label': `Оценка ${n} из 5` },
+        ...[1, 2, 3, 4, 5].map((i) => icon('star', i <= n ? 'is-on' : '')));
 
-    function initAdmin() {
-        const content = $('#adminContent');
-        const navLinks = $$('.admin__nav a');
-        const navPending = $('#navPending');
-        const STATUS_TABS = [['', 'Все'], ['pending', 'На модерации'], ['approved', 'Одобрены'], ['rejected', 'Отклонены'], ['blocked', 'Заблокированы']];
+    /** Публичный профиль продавца: объявления и отзывы. */
+    function initSeller() {
+        const root = $('.seller-page');
+        const sellerId = Number(root.dataset.seller);
+        const tabs = $$('#sellerTabs .tab');
+        const panels = { ads: $('#tabAds'), reviews: $('#tabReviews') };
+        const state = { ads: { page: 1, loaded: false }, reviews: { page: 1, loaded: false } };
 
-        const pill = (status, label) => el('span', { class: `pill pill--${status}` }, label);
-        const setPending = (n) => { navPending.textContent = n; navPending.hidden = !n; };
-        const adminApi = (action, params) => apiGet('admin', { action, ...params });
-        const adminPost = (action, data) => apiPost('admin', action, data);
-        const header = (title, subtitle, ...actions) =>
-            el('div', { class: 'admin-title' }, el('div', {}, el('h1', {}, title), subtitle ? el('p', {}, subtitle) : null), actions.length ? el('div', {}, ...actions) : null);
-
-        function tableShell(heads, cls = '') {
-            const tbody = el('tbody');
-            const wrap = el('div', { class: 'table-wrap' },
-                el('table', { class: `table ${cls}`.trim() }, el('thead', {}, el('tr', {}, ...heads.map((h) => el('th', {}, h)))), tbody));
-            return { wrap, tbody };
+        function showTab(name) {
+            tabs.forEach((t) => t.classList.toggle('is-active', t.dataset.tab === name));
+            Object.entries(panels).forEach(([k, p]) => (p.hidden = k !== name));
+            if (!state[name].loaded) { state[name].loaded = true; (name === 'ads' ? loadAds() : loadReviews()); }
+            history.replaceState(null, '', name === 'reviews' ? '#reviews' : location.pathname + location.search);
         }
+        tabs.forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
+        $$('[data-tab-link]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); showTab('reviews'); }));
 
-        // ------------------------------------------------------------ статистика
-        async function viewStats() {
-            content.replaceChildren(header('Статистика', 'Сводка по площадке'), el('div', { class: 'stats' }, ...[1, 2, 3, 4].map(() => el('div', { class: 'stat' }, el('div', { class: 'sk', style: { height: '70px' } })))));
-            const { stats } = await adminApi('stats');
-            setPending(stats.pending);
-            const tile = (cls, ico, label, value, href) =>
-                el('a', { class: `stat stat--${cls}`, href }, el('div', { class: 'stat__label' }, icon(ico), label), el('div', { class: 'stat__num' }, String(value)));
-            content.replaceChildren(
-                header('Статистика', 'Сводка по площадке'),
-                el('div', { class: 'stats' },
-                    tile('blue', 'users', 'Всего пользователей', stats.users, '#/users'),
-                    tile('green', 'list', 'Всего объявлений', stats.ads, '#/ads'),
-                    tile('yellow', 'clock', 'На модерации', stats.pending, '#/ads?status=pending'),
-                    tile('red', 'ban', 'Заблокировано', stats.blocked, '#/ads?status=blocked')),
-                el('div', { class: 'stats stats--small' },
-                    tile('green', 'check-circle', 'Одобрено', stats.approved, '#/ads?status=approved'),
-                    tile('red', 'x-circle', 'Отклонено', stats.rejected, '#/ads?status=rejected'),
-                    tile('blue', 'tag', 'Категорий', stats.categories, '#/categories')));
-        }
-
-        // ---------------------------------------------------------- пользователи
-        async function viewUsers() {
-            const state = { q: '', page: 1, items: [], total: 0, hasMore: false, token: 0 };
-            const search = el('input', { class: 'input', type: 'search', placeholder: 'Поиск по email…', autocomplete: 'off', 'aria-label': 'Поиск пользователей по email' });
-            const { wrap, tbody } = tableShell(['Email', 'Имя', 'Регистрация', 'Статус', 'Объявл.', 'Действия'], 'table--users');
-            const foot = el('div', { class: 'table-foot' });
-            const more = el('button', { class: 'btn btn--outline btn--sm', type: 'button', onClick: () => load(true) }, 'Показать ещё');
-
-            content.replaceChildren(
-                header('Пользователи', 'Мгновенный поиск по email'),
-                el('div', { class: 'toolbar' }, el('div', { class: 'search-big' }, icon('search'), search)),
-                el('div', { class: 'panel' }, wrap, foot));
-
-            function render() {
-                tbody.replaceChildren(...state.items.map(userRow));
-                if (!state.items.length) tbody.append(el('tr', {}, el('td', { colspan: 6 }, el('div', { class: 'table-empty' }, state.q ? 'Пользователи с таким email не найдены' : 'Пользователей пока нет'))));
-                foot.replaceChildren(...[el('span', {}, `Найдено: ${state.total}`), state.hasMore && more].filter(Boolean));
-            }
-
-            function userRow(u) {
-                const isAdmin = u.role === 'admin';
-                const actions = el('div', { class: 'row-actions' },
-                    el('button', { class: 'btn btn--outline btn--xs', type: 'button', onClick: () => (location.hash = `#/ads?user=${u.id}`) }, icon('list'), 'Объявления'));
-                if (!isAdmin) {
-                    actions.append(
-                        el('button', { class: 'btn btn--outline btn--xs', type: 'button', onClick: () => changePassword(u) }, icon('key'), 'Пароль'),
-                        el('button', { class: `btn btn--xs ${u.is_blocked ? 'btn--success' : 'btn--dark'}`, type: 'button', onClick: (e) => toggleBlock(u, e.currentTarget) },
-                            icon(u.is_blocked ? 'unlock' : 'lock'), u.is_blocked ? 'Разблокировать' : 'Заблокировать'),
-                        el('button', { class: 'btn btn--danger btn--xs', type: 'button', onClick: () => removeUser(u) }, icon('trash'), 'Удалить'));
-                }
-                return el('tr', {},
-                    el('td', { 'data-label': 'Email' }, el('div', { class: 'cell-stack' }, el('span', { class: 'cell-title' }, u.email), isAdmin ? pill('admin', 'Администратор') : null)),
-                    el('td', { 'data-label': 'Имя' }, u.name),
-                    el('td', { class: 'nowrap', 'data-label': 'Регистрация' }, u.created_at),
-                    el('td', { 'data-label': 'Статус' }, u.is_blocked ? pill('blocked', 'Заблокирован') : pill('active', 'Активен')),
-                    el('td', { class: 'num', 'data-label': 'Объявлений' }, String(u.ads_count)),
-                    el('td', {}, actions));
-            }
-
-            async function load(append = false) {
-                const my = ++state.token;
-                if (append) state.page += 1; else state.page = 1;
-                try {
-                    const data = await adminApi('users', { q: state.q, page: state.page });
-                    if (my !== state.token) return;
-                    state.items = append ? state.items.concat(data.items) : data.items;
-                    state.total = data.total;
-                    state.hasMore = data.has_more;
-                    render();
-                } catch (err) {
-                    if (append) state.page -= 1;
-                    handleApiError(err);
-                }
-            }
-
-            async function toggleBlock(u, btn) {
-                const block = !u.is_blocked;
-                if (block && !(await confirmDialog(`${u.email} не сможет войти на сайт, а его объявления пропадут из ленты.`, { title: 'Заблокировать пользователя?', confirmText: 'Заблокировать' }))) return;
-                await withLoading(btn, async () => {
-                    await adminPost(block ? 'user_block' : 'user_unblock', { id: u.id });
-                    u.is_blocked = block;
-                    toast(block ? 'Пользователь заблокирован' : 'Пользователь разблокирован');
-                    render();
-                });
-            }
-
-            async function changePassword(u) {
-                await openModal({
-                    title: 'Сменить пароль',
-                    text: u.email,
-                    submitText: 'Сменить пароль',
-                    content: field({ name: 'password', type: 'password', placeholder: 'Новый пароль (от 6 символов)', autocomplete: 'new-password' }),
-                    onSubmit: async (form) => {
-                        const password = form.elements.password.value;
-                        if (password.length < 6) throw new ApiError('', 422, { password: 'Пароль: минимум 6 символов' });
-                        await adminPost('user_password', { id: u.id, password });
-                        toast('Пароль изменён');
-                    },
-                });
-            }
-
-            async function removeUser(u) {
-                const ok = await confirmDialog(`Пользователь ${u.email}, все его объявления (${u.ads_count}) и фото будут удалены безвозвратно.`, { title: 'Удалить пользователя?', confirmText: 'Удалить' });
-                if (!ok) return;
-                try {
-                    await adminPost('user_delete', { id: u.id });
-                    state.items = state.items.filter((x) => x.id !== u.id);
-                    state.total -= 1;
-                    toast('Пользователь удалён');
-                    render();
-                } catch (err) {
-                    handleApiError(err);
-                }
-            }
-
-            search.addEventListener('input', debounce(() => { state.q = search.value.trim(); load(); }, 300));
-            search.focus();
-            await load();
-        }
-
-        // ------------------------------------------------------------ объявления
-        async function viewAds(params) {
-            const state = { status: params.get('status') || '', user: params.get('user') || '', q: '', page: 1, items: [], total: 0, counts: {}, hasMore: false, token: 0 };
-            const tabsBox = el('div', { class: 'tabs' });
-            const chips = el('div', { class: 'toolbar' });
-            const search = el('input', { class: 'input', type: 'search', placeholder: 'Поиск по заголовку или email автора…', autocomplete: 'off', 'aria-label': 'Поиск объявлений' });
-            const { wrap, tbody } = tableShell(['ID', 'Объявление', 'Пользователь', 'Цена', 'Город', 'Статус', 'Дата', 'Действия'], 'table--ads table--sticky');
-            const foot = el('div', { class: 'table-foot' });
-            const more = el('button', { class: 'btn btn--outline btn--sm', type: 'button', onClick: () => load(true) }, 'Показать ещё');
-
-            content.replaceChildren(
-                header('Объявления', 'Модерация и управление'),
-                el('div', { class: 'toolbar' }, el('div', { class: 'search-big' }, icon('search'), search)),
-                chips, tabsBox,
-                el('div', { class: 'panel' }, wrap, foot));
-
-            function renderTabs() {
-                tabsBox.replaceChildren(...STATUS_TABS.map(([key, label]) =>
-                    el('button', { type: 'button', class: `tab${state.status === key ? ' is-active' : ''}`, onClick: () => { state.status = key; renderTabs(); load(); } },
-                        label, el('span', { class: 'tab__count' }, String(state.counts[key || 'all'] ?? 0)))));
-                chips.replaceChildren();
-                if (state.user) {
-                    const owner = state.items.find((a) => String(a.user_id) === state.user);
-                    chips.append(el('span', { class: 'filter-chip' }, `Пользователь: ${owner ? owner.user_email : '#' + state.user}`,
-                        el('button', { type: 'button', 'aria-label': 'Сбросить фильтр', onClick: () => { state.user = ''; load(); } }, icon('x'))));
-                }
-                chips.hidden = !state.user;
-            }
-
-            function render() {
-                renderTabs();
-                tbody.replaceChildren(...state.items.map(adRow));
-                if (!state.items.length) tbody.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'table-empty' }, 'Объявлений не найдено'))));
-                foot.replaceChildren(...[el('span', {}, `Найдено: ${state.total}`), state.hasMore && more].filter(Boolean));
-                setPending(state.counts.pending ?? 0);
-            }
-
-            function adRow(ad) {
-                const act = el('div', { class: 'row-actions' });
-                if (ad.status !== 'approved') {
-                    act.append(el('button', { class: 'btn btn--success btn--xs', type: 'button', onClick: (e) => approve(ad, e.currentTarget) },
-                        icon('check'), ad.status === 'blocked' ? 'Разблокировать' : 'Одобрить'));
-                }
-                if (ad.status === 'pending' || ad.status === 'approved') {
-                    act.append(el('button', { class: 'btn btn--danger btn--xs', type: 'button', onClick: () => reject(ad, 'rejected') }, icon('x'), 'Отклонить'));
-                }
-                if (ad.status !== 'blocked') {
-                    act.append(el('button', { class: 'btn btn--dark btn--xs', type: 'button', onClick: () => reject(ad, 'blocked') }, icon('ban'), 'Заблокировать'));
-                }
-                return el('tr', {},
-                    el('td', { class: 'num', 'data-label': 'ID' }, '#' + ad.id),
-                    el('td', { 'data-label': 'Объявление' }, el('div', { class: 'cell-stack' },
-                        el('a', { class: 'cell-title', href: ad.url, target: '_blank', rel: 'noopener', title: ad.title }, ad.title),
-                        el('span', { class: 'cell-sub' }, `${ad.category_icon} ${ad.category_name}`))),
-                    el('td', { 'data-label': 'Пользователь' }, el('div', { class: 'cell-stack' }, el('span', { class: 'cell-title', title: ad.user_name }, ad.user_email), ad.user_blocked ? pill('blocked', 'Автор заблокирован') : null)),
-                    el('td', { class: 'price', 'data-label': 'Цена' }, ad.price_text),
-                    el('td', { 'data-label': 'Город' }, ad.city),
-                    el('td', { 'data-label': 'Статус' }, el('div', { class: 'cell-stack' }, pill(ad.status, ad.status_label), ad.rejection_reason && ad.status !== 'approved' ? el('span', { class: 'cell-reason' }, ad.rejection_reason) : null)),
-                    el('td', { class: 'nowrap', title: ad.date_full, 'data-label': 'Дата' }, ad.date_text),
-                    el('td', {}, act));
-            }
-
-            /** Меняет статус в локальном состоянии и пересчитывает табы без повторного запроса. */
-            function applyStatus(ad, status, reason) {
-                state.counts[ad.status] -= 1;
-                state.counts[status] = (state.counts[status] || 0) + 1;
-                ad.status = status;
-                ad.status_label = { approved: 'Одобрено', rejected: 'Отклонено', blocked: 'Заблокировано' }[status];
-                ad.rejection_reason = reason || null;
-                if (state.status && state.status !== status) {
-                    state.items = state.items.filter((a) => a !== ad);
-                    state.total -= 1;
-                }
-                render();
-            }
-
-            async function approve(ad, btn) {
-                await withLoading(btn, async () => {
-                    await adminPost('ad_moderate', { id: ad.id, status: 'approved' });
-                    toast('Объявление одобрено');
-                    applyStatus(ad, 'approved', null);
-                });
-            }
-
-            async function reject(ad, status) {
-                const isBlock = status === 'blocked';
-                let reason = null;
-                const ok = await openModal({
-                    title: 'Укажите причину',
-                    text: `${isBlock ? 'Заблокировать' : 'Отклонить'} объявление «${ad.title}». Автор увидит причину в «Моих объявлениях».`,
-                    submitText: 'Подтвердить',
-                    danger: true,
-                    submitKind: isBlock ? 'btn--dark' : 'btn--danger',
-                    content: field({ name: 'reason', rows: 4, maxlength: 1000, placeholder: isBlock ? 'Например: нарушает правила размещения…' : 'Например: добавьте реальные фото и опишите состояние…' }),
-                    onSubmit: async (form) => {
-                        reason = form.elements.reason.value.trim();
-                        if (reason.length < 3) throw new ApiError('', 422, { reason: 'Укажите причину (минимум 3 символа)' });
-                        await adminPost('ad_moderate', { id: ad.id, status, reason });
-                    },
-                });
-                if (ok) {
-                    toast(isBlock ? 'Объявление заблокировано' : 'Объявление отклонено');
-                    applyStatus(ad, status, reason);
-                }
-            }
-
-            async function load(append = false) {
-                const my = ++state.token;
-                if (append) state.page += 1; else state.page = 1;
-                try {
-                    const data = await adminApi('ads', { status: state.status, user: state.user, q: state.q, page: state.page });
-                    if (my !== state.token) return;
-                    state.items = append ? state.items.concat(data.items) : data.items;
-                    state.total = data.total;
-                    state.counts = data.counts;
-                    state.hasMore = data.has_more;
-                    render();
-                } catch (err) {
-                    if (append) state.page -= 1;
-                    handleApiError(err);
-                }
-            }
-
-            search.addEventListener('input', debounce(() => { state.q = search.value.trim(); load(); }, 300));
-            renderTabs();
-            await load();
-        }
-
-        // ------------------------------------------------------------ категории
-        async function viewCategories() {
-            const list = el('div', { class: 'cat-list' });
-            const addBtn = el('button', { class: 'btn btn--primary', type: 'button', onClick: () => categoryModal() }, icon('plus'), 'Добавить категорию');
-            content.replaceChildren(header('Категории', 'Разделы доски объявлений', addBtn), el('div', { class: 'panel' }, list));
-
-            let items = [];
-            const render = () => {
-                list.replaceChildren(...items.map(row));
-                if (!items.length) list.append(el('div', { class: 'table-empty' }, 'Категорий пока нет'));
-            };
-
-            function row(cat) {
-                const view = el('div', { class: 'cat-row' },
-                    el('div', { class: 'cat-row__icon' }, cat.icon),
-                    el('div', { class: 'cat-row__name' }, cat.name),
-                    el('div', { class: 'cat-row__count' }, `${cat.total_ads} ${plural(cat.total_ads, 'объявление', 'объявления', 'объявлений')}`),
-                    el('div', { class: 'row-actions' },
-                        el('button', { class: 'btn btn--outline btn--sm', type: 'button', onClick: () => edit(cat, view) }, icon('edit'), 'Изменить'),
-                        el('button', { class: 'btn btn--danger btn--sm', type: 'button', onClick: () => remove(cat) }, icon('trash'), 'Удалить')));
-                return view;
-            }
-
-            /** Inline-редактирование: строка превращается в поля ввода. */
-            function edit(cat, view) {
-                const iconInput = el('input', { class: 'input cat-row__icon-input', value: cat.icon, maxlength: 8, 'aria-label': 'Иконка' });
-                const nameInput = el('input', { class: 'input', value: cat.name, maxlength: 80, 'aria-label': 'Название' });
-                const err = el('span', { class: 'field__error', style: { gridColumn: '2 / -1' } });
-                const save = el('button', { class: 'btn btn--primary btn--sm', type: 'button' }, icon('check'), 'Сохранить');
-                const cancel = el('button', { class: 'btn btn--text btn--sm', type: 'button', onClick: () => editRow.replaceWith(row(cat)) }, 'Отмена');
-                const run = async () => {
-                    setLoading(save, true);
-                    try {
-                        await adminPost('category_update', { id: cat.id, name: nameInput.value, icon: iconInput.value });
-                        Object.assign(cat, { name: nameInput.value.trim(), icon: iconInput.value.trim() || '📦' });
-                        toast('Категория сохранена');
-                        editRow.replaceWith(row(cat));
-                    } catch (e) {
-                        setLoading(save, false);
-                        if (e instanceof ApiError && e.errors) err.textContent = e.errors.name || e.errors.icon || e.message;
-                        else handleApiError(e);
-                    }
-                };
-                save.addEventListener('click', run);
-                nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); if (e.key === 'Escape') cancel.click(); });
-                const editRow = el('div', { class: 'cat-row' }, iconInput, nameInput, el('div', { class: 'row-actions' }, save, cancel), err);
-                editRow.style.gridTemplateColumns = '56px minmax(0, 1fr) auto';
-                view.replaceWith(editRow);
-                nameInput.focus();
-                nameInput.select();
-            }
-
-            async function remove(cat) {
-                const warn = cat.total_ads
-                    ? `В категории ${cat.total_ads} ${plural(cat.total_ads, 'объявление', 'объявления', 'объявлений')}. Они не удалятся, но останутся без категории.`
-                    : 'Категория пуста — её можно безопасно удалить.';
-                if (!(await confirmDialog(warn, { title: `Удалить «${cat.name}»?`, confirmText: 'Удалить' }))) return;
-                try {
-                    await adminPost('category_delete', { id: cat.id });
-                    items = items.filter((c) => c.id !== cat.id);
-                    toast('Категория удалена');
-                    render();
-                } catch (err) {
-                    handleApiError(err);
-                }
-            }
-
-            async function categoryModal() {
-                const body = el('div', {}, field({ name: 'name', label: 'Название', placeholder: 'Например, Спорт и отдых', maxlength: 80 }), field({ name: 'icon', label: 'Иконка (эмодзи)', placeholder: '⚽', maxlength: 8 }));
-                body.firstElementChild.style.marginBottom = '14px';
-                const done = await openModal({
-                    title: 'Новая категория', submitText: 'Добавить', content: body,
-                    onSubmit: async (form) => { await adminPost('category_create', { name: form.elements.name.value, icon: form.elements.icon.value }); },
-                });
-                if (done) { toast('Категория добавлена'); await refresh(); }
-            }
-
-            async function refresh() {
-                items = (await adminApi('categories')).items;
-                render();
-            }
-            await refresh();
-        }
-
-        // ---------------------------------------------------------------- роутер
-        const routes = { stats: viewStats, users: viewUsers, ads: viewAds, categories: viewCategories };
-        let routeToken = 0;
-
-        async function route() {
-            const hash = location.hash.replace(/^#\/?/, '');
-            const [name, query = ''] = hash.split('?');
-            const section = routes[name] ? name : 'stats';
-            const my = ++routeToken;
-            navLinks.forEach((a) => a.classList.toggle('is-active', a.dataset.section === section));
-            window.scrollTo({ top: 0 });
+        // --- объявления продавца
+        const grid = $('#sellerGrid');
+        const moreBox = $('#sellerMoreBox');
+        const moreBtn = $('#sellerMore');
+        async function loadAds(append = false) {
+            if (!append) grid.replaceChildren(...skeletonCards(4));
             try {
-                await routes[section](new URLSearchParams(query));
+                const data = await apiGet('listings', { action: 'list', user: sellerId, page: state.ads.page });
+                if (!append) grid.replaceChildren();
+                data.items.forEach((ad, i) => grid.append(adCard(ad, { index: i })));
+                if (!data.total) grid.replaceChildren(emptyState({ emoji: '📭', title: 'Пока нет объявлений', text: 'У этого продавца нет опубликованных объявлений.' }));
+                moreBox.hidden = !data.has_more;
             } catch (err) {
-                if (my === routeToken) {
-                    content.replaceChildren(emptyState({ emoji: '😵', title: 'Не удалось загрузить раздел', text: err.message }));
-                    handleApiError(err);
-                }
+                handleApiError(err);
+            } finally {
+                setLoading(moreBtn, false);
             }
         }
+        moreBtn.addEventListener('click', () => { state.ads.page += 1; setLoading(moreBtn, true); loadAds(true); });
 
-        window.addEventListener('hashchange', route);
-        // счётчик «на модерации» в меню виден сразу, независимо от раздела
-        adminApi('stats').then((d) => setPending(d.stats.pending)).catch(() => {});
-        route();
+        // --- отзывы
+        const list = $('#reviewsList');
+        const summaryBox = $('#reviewsSummary');
+        const formBox = $('#reviewForm');
+        const revMoreBox = $('#reviewsMoreBox');
+        const revMore = $('#reviewsMore');
+
+        function renderSummary(s) {
+            summaryBox.replaceChildren(
+                el('div', { class: 'rev-score' }, el('b', {}, s.count ? String(s.avg).replace('.', ',') : '—'), starsRow(Math.round(s.avg))),
+                el('p', { class: 'muted' }, s.count ? `${s.count} ${plural(s.count, 'отзыв', 'отзыва', 'отзывов')}` : 'Пока нет отзывов'),
+                el('div', { class: 'rev-bars' }, ...[5, 4, 3, 2, 1].map((n) =>
+                    el('div', { class: 'rev-bar' }, el('span', {}, String(n)),
+                        el('div', { class: 'rev-bar__track' }, el('div', { class: 'rev-bar__fill', style: { width: (s.count ? (s.dist[n] / s.count) * 100 : 0) + '%' } })),
+                        el('span', {}, String(s.dist[n]))))));
+        }
+
+        function reviewNode(r) {
+            const canDelete = APP.user && (APP.user.id === r.author.id || APP.user.role === 'admin');
+            const avatar = r.author.avatar
+                ? el('span', { class: 'avatar avatar--img' }, el('img', { src: r.author.avatar, alt: '', referrerpolicy: 'no-referrer' }))
+                : el('span', { class: 'avatar' }, r.author.initial);
+            return el('article', { class: 'review' }, avatar,
+                el('div', {},
+                    el('div', { class: 'review__head' }, el('strong', {}, r.author.name), starsRow(r.rating), el('span', { class: 'muted' }, r.date_text),
+                        canDelete ? el('button', { class: 'btn btn--text btn--sm review__del', type: 'button', onClick: () => removeReview(r) }, icon('trash'), 'Удалить') : null),
+                    el('p', { class: 'review__body' }, r.body)));
+        }
+
+        async function removeReview(r) {
+            if (!(await confirmDialog('Отзыв будет удалён.', { title: 'Удалить отзыв?', confirmText: 'Удалить' }))) return;
+            try {
+                await apiPost('reviews', 'delete', { id: r.id });
+                toast('Отзыв удалён');
+                state.reviews.page = 1;
+                loadReviews();
+            } catch (err) { handleApiError(err); }
+        }
+
+        async function renderReviewForm() {
+            let can;
+            try { can = await apiGet('reviews', { action: 'can', seller: sellerId }); } catch { return; }
+            formBox.replaceChildren();
+            if (!can.can) {
+                const hint = { login: ['Чтобы оставить отзыв, ', el('a', { href: '/login.php?next=' + encodeURIComponent(location.pathname + location.search + '#reviews') }, 'войдите в аккаунт'), '.'],
+                    no_chat: ['Отзыв можно оставить после общения с продавцом в чате — так мы защищаем рейтинг от накрутки.'], self: [] }[can.reason] || [];
+                if (hint.length) formBox.append(el('div', { class: 'review-hint' }, ...hint));
+                return;
+            }
+            let rating = can.mine ? can.mine.rating : 0;
+            const picker = el('div', { class: 'star-picker', role: 'radiogroup', 'aria-label': 'Оценка' });
+            const paint = () => $$('button', picker).forEach((b, i) => b.classList.toggle('is-on', i < rating));
+            [1, 2, 3, 4, 5].forEach((n) => picker.append(el('button', { type: 'button', 'aria-label': `${n} из 5`, onClick: () => { rating = n; paint(); } }, icon('star'))));
+            paint();
+            const body = el('textarea', { class: 'textarea', name: 'body', rows: 3, maxlength: 1000, placeholder: 'Как всё прошло? Совпало ли с описанием, быстро ли договорились?' });
+            body.value = can.mine ? can.mine.body : '';
+            const form = el('form', { class: 'review-form', novalidate: true },
+                el('h3', {}, can.mine ? 'Ваш отзыв' : 'Оставить отзыв'), picker,
+                el('p', { class: 'field__error', 'data-error-for': 'rating' }),
+                body, el('p', { class: 'field__error', 'data-error-for': 'body' }),
+                el('button', { class: 'btn btn--primary', type: 'submit', style: { marginTop: '12px' } }, can.mine ? 'Сохранить отзыв' : 'Отправить отзыв'));
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                clearErrors(form);
+                const btn = $('[type="submit"]', form);
+                setLoading(btn, true);
+                try {
+                    await apiPost('reviews', 'save', { seller_id: sellerId, rating, body: body.value });
+                    toast('Спасибо за отзыв!');
+                    state.reviews.page = 1;
+                    await loadReviews();
+                } catch (err) {
+                    if (!(err instanceof ApiError && showErrors(form, err.errors))) handleApiError(err);
+                } finally { setLoading(btn, false); }
+            });
+            liveClear(form);
+            formBox.append(form);
+        }
+
+        async function loadReviews(append = false) {
+            try {
+                const data = await apiGet('reviews', { action: 'list', seller: sellerId, page: state.reviews.page });
+                renderSummary(data.summary);
+                $('.tab__count', tabs[1]).textContent = data.summary.count;
+                if (!append) { list.replaceChildren(); await renderReviewForm(); }
+                data.items.forEach((r) => list.append(reviewNode(r)));
+                if (!data.total) list.replaceChildren(emptyState({ emoji: '⭐', title: 'Отзывов пока нет', text: 'Будьте первым, кто оценит этого продавца.' }));
+                revMoreBox.hidden = !data.has_more;
+            } catch (err) { handleApiError(err); } finally { setLoading(revMore, false); }
+        }
+        revMore.addEventListener('click', () => { state.reviews.page += 1; setLoading(revMore, true); loadReviews(true); });
+
+        showTab(location.hash === '#reviews' ? 'reviews' : 'ads');
+    }
+
+    /** Настройки профиля: данные, аватар, пароль, привязка VK. */
+    function initProfile() {
+        const profileForm = $('#profileForm');
+        const passForm = $('#passwordForm');
+        liveClear(profileForm);
+        if (passForm) liveClear(passForm);
+
+        $$('[data-counter-for]').forEach((c) => {
+            const input = profileForm.elements[c.dataset.counterFor];
+            const update = () => (c.textContent = `${input.value.length} / ${input.maxLength}`);
+            input.addEventListener('input', update);
+            update();
+        });
+
+        profileForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearErrors(profileForm);
+            const btn = $('[type="submit"]', profileForm);
+            setLoading(btn, true);
+            try {
+                await apiPost('profile', 'update', Object.fromEntries(new FormData(profileForm)));
+                toast('Профиль сохранён');
+            } catch (err) {
+                if (!(err instanceof ApiError && showErrors(profileForm, err.errors))) handleApiError(err);
+            } finally { setLoading(btn, false); }
+        });
+
+        if (passForm) {
+            passForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                clearErrors(passForm);
+                const btn = $('[type="submit"]', passForm);
+                setLoading(btn, true);
+                try {
+                    await apiPost('profile', 'password', Object.fromEntries(new FormData(passForm)));
+                    toast('Пароль сохранён');
+                    passForm.reset();
+                } catch (err) {
+                    if (!(err instanceof ApiError && showErrors(passForm, err.errors))) handleApiError(err);
+                } finally { setLoading(btn, false); }
+            });
+        }
+
+        // --- аватар
+        const file = $('#avatarFile');
+        const preview = $('#avatarPreview');
+        const removeBtn = $('#avatarRemove');
+        const paintAvatars = (url) => {
+            const mk = (cls) => url
+                ? el('span', { class: `avatar avatar--img ${cls}`.trim() }, el('img', { src: url, alt: '', referrerpolicy: 'no-referrer' }))
+                : el('span', { class: `avatar ${cls}`.trim() }, (APP.user.name || '?').charAt(0).toUpperCase());
+            preview.replaceChildren(mk('avatar--xl'));
+            const headerBtn = $('.user-menu__btn');
+            if (headerBtn) headerBtn.replaceChildren(mk(''));
+            removeBtn.hidden = !url;
+        };
+        $('#avatarPick').addEventListener('click', () => file.click());
+        file.addEventListener('change', async () => {
+            if (!file.files[0]) return;
+            if (file.files[0].size > MAX_BYTES) { toast('Файл больше 5 МБ', 'error'); file.value = ''; return; }
+            const fd = new FormData();
+            fd.append('file', file.files[0]);
+            file.value = '';
+            try {
+                const res = await api('/api/profile.php?action=avatar', { method: 'POST', form: fd });
+                paintAvatars(res.avatar);
+                toast(res.message);
+            } catch (err) { handleApiError(err); }
+        });
+        removeBtn.addEventListener('click', async () => {
+            try { await apiPost('profile', 'avatar_delete'); paintAvatars(null); toast('Фото удалено'); } catch (err) { handleApiError(err); }
+        });
+
+        // --- VK
+        const unlink = $('#vkUnlink');
+        if (unlink) {
+            unlink.addEventListener('click', async () => {
+                if (!(await confirmDialog('Вы больше не сможете входить через VK. Войти по email и паролю при этом можно.', { title: 'Отвязать VK?', confirmText: 'Отвязать' }))) return;
+                try { await apiPost('profile', 'vk_unlink'); toast('VK отвязан'); setTimeout(() => location.reload(), 600); } catch (err) { handleApiError(err); }
+            });
+        }
+    }
+
+    /** Статистика объявления для автора: плитки и графики за 14 дней. */
+    async function initAdStats() {
+        const id = Number($('.stats-page').dataset.ad);
+        const tiles = $('#statTiles');
+        tiles.replaceChildren(...[1, 2, 3, 4].map(() => el('div', { class: 'tile' }, el('div', { class: 'sk', style: { height: '64px' } }))));
+        try {
+            const { totals: t, days } = await apiGet('listings', { action: 'stats', id });
+            const tile = (cls, ico, label, value, sub) => el('div', { class: `tile tile--${cls}` },
+                el('div', { class: 'tile__label' }, icon(ico), label), el('div', { class: 'tile__num' }, String(value)), sub ? el('div', { class: 'tile__sub' }, sub) : null);
+            tiles.replaceChildren(
+                tile('blue', 'eye', 'Просмотры', t.views, 'уникальные посетители'),
+                tile('red', 'heart', 'В избранном', t.favorites, 'сейчас'),
+                tile('green', 'phone', 'Показали телефон', t.phones, 'уникальные'),
+                tile('yellow', 'message', 'Диалоги в чате', t.chats, `конверсия в контакт — ${String(t.contact_rate).replace('.', ',')}%`));
+            const css = getComputedStyle(document.documentElement);
+            const color = (v) => css.getPropertyValue(v).trim() || v;
+            $('#chartViews').replaceChildren(barChart(days, [{ key: 'views', label: 'Просмотры', color: color('--blue') }]));
+            $('#chartInterest').replaceChildren(barChart(days, [
+                { key: 'contacts', label: 'Контакты', color: color('--yellow') },
+                { key: 'favorites', label: 'В избранное', color: color('--red') },
+            ]));
+        } catch (err) {
+            handleApiError(err);
+            tiles.replaceChildren(emptyState({ emoji: '😵', title: 'Не удалось загрузить статистику', text: err.message }));
+        }
     }
 
     /* ======================================================================
@@ -1411,12 +1619,23 @@
         register: () => initAuthForm($('#registerForm'), 'register'),
         'create-ad': initCreateAd,
         'my-ads': initMyAds,
-        messages: initMessages,
-        admin: initAdmin,
+        favorites: initFavorites,
+        seller: initSeller,
+        profile: initProfile,
+        'ad-stats': initAdStats,
+    };
+
+    // Общий набор помощников для page-скриптов (chat.js, admin.js)
+    window.Board = {
+        APP, $, $$, el, icon, debounce, plural, clamp, qs, safeNext,
+        ApiError, api, apiGet, apiPost, handleApiError,
+        toast, setLoading, withLoading, clearErrors, showErrors, liveClear, field, openModal, confirmDialog, askReason,
+        adCard, skeletonCards, emptyState, barChart, favBtn, realtime, attachCityAutocomplete, pages, applyTheme,
     };
 
     document.addEventListener('DOMContentLoaded', () => {
         initHeader();
+        realtime.start();
         const init = pages[document.body.dataset.page];
         if (init) init();
     });

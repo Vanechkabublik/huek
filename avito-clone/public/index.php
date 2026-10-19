@@ -56,6 +56,8 @@ View::header([
                     </select>
                 </div>
 
+                <div id="attrFilters" class="attr-filters"></div>
+
                 <div class="field">
                     <span class="field__label">Цена, ₽</span>
                     <div class="range">

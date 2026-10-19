@@ -5,6 +5,7 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use App\Ad;
 use App\Auth;
+use App\Stats;
 use App\View;
 
 $id   = (int) ($_GET['id'] ?? 0);
@@ -14,8 +15,8 @@ if ($ad === null) {
     View::notFound('Объявление не найдено, снято с публикации или ещё не прошло модерацию.');
 }
 
-// Просмотры считаем только у опубликованных объявлений и не у самого автора
-if ($ad['status'] === 'approved' && !$ad['is_owner'] && Ad::recordView($id)) {
+// Считаем людей, а не загрузки страницы: повторный заход и обновление страницы просмотр не увеличивают
+if ($ad['status'] === 'approved' && Stats::trackView($id, (int) $ad['user_id'], $user)) {
     $ad['views']++;
 }
 
@@ -96,13 +97,20 @@ View::header([
 
         <aside class="ad-side">
             <div class="buy-card">
-                <div class="price-big"><?= e($ad['price_text']) ?></div>
+                <div class="buy-card__top">
+                    <div class="price-big"><?= e($ad['price_text']) ?></div>
+                    <?php if (!$ad['is_owner'] && $ad['status'] === 'approved'): ?>
+                        <button class="fav-btn fav-btn--lg<?= $ad['is_favorite'] ? ' is-active' : '' ?>" type="button" data-fav-ad="<?= $ad['id'] ?>"
+                                aria-pressed="<?= $ad['is_favorite'] ? 'true' : 'false' ?>" title="В избранное" aria-label="В избранное"><?= View::icon('heart') ?></button>
+                    <?php endif; ?>
+                </div>
 
                 <?php if ($ad['is_owner']): ?>
                     <div class="buy-card__actions">
                         <?php if ($ad['can_edit']): ?>
                             <a class="btn btn--primary btn--lg btn--block" href="/create-ad.php?id=<?= $ad['id'] ?>"><?= View::icon('edit') ?>Редактировать</a>
                         <?php endif; ?>
+                        <a class="btn btn--outline btn--lg btn--block" href="/ad-stats.php?id=<?= $ad['id'] ?>"><?= View::icon('trending') ?>Статистика</a>
                         <button class="btn btn--outline btn--lg btn--block btn--danger-text" type="button" id="deleteAdBtn"><?= View::icon('trash') ?>Удалить</button>
                     </div>
                 <?php else: ?>
@@ -110,9 +118,9 @@ View::header([
                         <button class="btn btn--primary btn--lg btn--block" type="button" id="showPhoneBtn" data-ad="<?= $ad['id'] ?>">
                             <?= View::icon('phone') ?><span>Показать телефон</span>
                         </button>
-                        <button class="btn btn--yellow btn--lg btn--block" type="button" id="writeBtn">
+                        <a class="btn btn--yellow btn--lg btn--block" id="writeBtn" href="/chat.php?ad=<?= $ad['id'] ?>">
                             <?= View::icon('message') ?>Написать сообщение
-                        </button>
+                        </a>
                     </div>
                 <?php endif; ?>
 
@@ -121,11 +129,16 @@ View::header([
                 <?php endif; ?>
 
                 <div class="seller">
-                    <span class="avatar avatar--lg"><?= e($seller['initial']) ?></span>
+                    <a href="/seller.php?id=<?= $seller['id'] ?>" aria-label="Профиль продавца"><?= View::avatar(['name' => $seller['name'], 'avatar' => $seller['avatar']], 'avatar--lg') ?></a>
                     <div class="seller__info">
-                        <strong class="seller__name"><?= e($seller['name']) ?></strong>
-                        <span class="seller__since"><?= e($seller['member_since']) ?></span>
-                        <a class="seller__link" href="/index.php?user=<?= $seller['id'] ?>">Все объявления продавца (<?= $seller['ads_count'] ?>)</a>
+                        <a class="seller__name" href="/seller.php?id=<?= $seller['id'] ?>"><?= e($seller['name']) ?></a>
+                        <?php if ($seller['reviews'] > 0): ?>
+                            <span class="rating"><?= View::icon('star') ?><b><?= number_format($seller['rating'], 1, ',', '') ?></b><span class="muted">· <?= $seller['reviews'] ?> <?= App\Validator::plural($seller['reviews'], 'отзыв', 'отзыва', 'отзывов') ?></span></span>
+                        <?php else: ?>
+                            <span class="seller__since">Пока нет отзывов</span>
+                        <?php endif; ?>
+                        <span class="seller__since"><?= e($seller['member_since']) ?><?= $seller['vk_verified'] ? ' · ' . View::icon('shield-check', 'icon--inline') . ' через VK' : '' ?></span>
+                        <a class="seller__link" href="/seller.php?id=<?= $seller['id'] ?>">Профиль и объявления (<?= $seller['ads_count'] ?>)</a>
                     </div>
                 </div>
 
@@ -140,6 +153,15 @@ View::header([
                 <li><?= View::icon('calendar') ?><span>Опубликовано</span><b><?= e($ad['date_text']) ?></b></li>
                 <li><?= View::icon('eye') ?><span>Просмотры</span><b><?= number_format($ad['views'], 0, '', "\u{00A0}") ?></b></li>
             </ul>
+
+            <?php if ($ad['attribute_list']): ?>
+                <h2 class="section-title">Характеристики</h2>
+                <dl class="specs">
+                    <?php foreach ($ad['attribute_list'] as $a): ?>
+                        <div class="specs__row"><dt><?= e($a['label']) ?></dt><dd><?= e($a['value']) ?></dd></div>
+                    <?php endforeach; ?>
+                </dl>
+            <?php endif; ?>
 
             <h2 class="section-title">Описание</h2>
             <div class="ad-description"><?= e($ad['description']) ?></div>

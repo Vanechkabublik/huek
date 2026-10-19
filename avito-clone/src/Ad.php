@@ -23,11 +23,12 @@ final class Ad
     public static function baseSelect(string $extraColumns = ''): string
     {
         return "SELECT a.id, a.user_id, a.category_id, a.title, a.price, a.city, a.status,
-                       a.rejection_reason, a.views, a.created_at $extraColumns,
+                       a.rejection_reason, a.views, a.created_at, a.attributes $extraColumns,
                        c.name AS category_name, c.icon AS category_icon,
                        u.email AS user_email, u.name AS user_name, u.is_blocked AS user_blocked,
                        (SELECT filename FROM ad_images WHERE ad_id = a.id ORDER BY id LIMIT 1) AS cover,
-                       (SELECT COUNT(*) FROM ad_images WHERE ad_id = a.id) AS images_count
+                       (SELECT COUNT(*) FROM ad_images WHERE ad_id = a.id) AS images_count,
+                       (SELECT COUNT(*) FROM favorites WHERE ad_id = a.id) AS fav_count
                 FROM ads a
                 JOIN users u ON u.id = a.user_id
                 LEFT JOIN categories c ON c.id = a.category_id";
@@ -36,10 +37,11 @@ final class Ad
     /**
      * Публичная выдача (только одобренные объявления незаблокированных авторов).
      *
-     * @param array{q?:string,category?:int,city?:string,price_min?:string,price_max?:string,sort?:string,user?:int,exclude?:int} $f
+     * @param array<string,mixed> $f q, category, city, price_min, price_max, sort, user, exclude и a_<код> / a_<код>_min / a_<код>_max
+     *                               (фильтры по характеристикам выбранной категории)
      * @return array{items:array,total:int,page:int,pages:int,per_page:int,has_more:bool}
      */
-    public static function search(array $f, int $page = 1): array
+    public static function search(array $f, int $page = 1, ?int $viewerId = null): array
     {
         $where  = ["a.status = 'approved'", 'u.is_blocked = 0'];
         $params = [];
@@ -78,6 +80,11 @@ final class Ad
             $where[] = 'a.id <> ?';
             $params[] = (int) $f['exclude'];
         }
+        if (!empty($f['category'])) {
+            [$attrWhere, $attrParams] = Attribute::filterClauses((int) $f['category'], $f);
+            array_push($where, ...$attrWhere);
+            array_push($params, ...$attrParams);
+        }
 
         $order = match ($f['sort'] ?? 'date') {
             'price_asc'  => 'a.price ASC, a.id DESC',
@@ -96,8 +103,11 @@ final class Ad
         $offset = ($page - 1) * $limit;
         $rows = Database::all(self::baseSelect() . " WHERE $whereSql ORDER BY $order LIMIT $limit OFFSET $offset", $params);
 
+        $items = array_map(static fn(array $r) => self::card($r), $rows);
+        Favorite::mark($items, $viewerId);
+
         return [
-            'items'    => array_map(static fn(array $r) => self::card($r), $rows),
+            'items'    => $items,
             'total'    => $total,
             'page'     => $page,
             'pages'    => max(1, (int) ceil($total / $limit)),
@@ -131,9 +141,12 @@ final class Ad
             'cover'         => !empty($r['cover']) ? Upload::thumbUrl($r['cover']) : null,
             'images_count'  => (int) $r['images_count'],
             'url'           => '/ad.php?id=' . (int) $r['id'],
+            'specs'         => self::specs($r),
+            'is_favorite'   => false,
         ];
         if ($private) {
             $out += [
+                'fav_count'        => (int) ($r['fav_count'] ?? 0),
                 'rejection_reason' => $r['rejection_reason'],
                 'user_id'          => (int) $r['user_id'],
                 'user_email'       => $r['user_email'],
@@ -142,6 +155,32 @@ final class Ad
             ];
         }
         return $out;
+    }
+
+    /** @return array<string,mixed> характеристики объявления (JSONB → массив) */
+    public static function decodeAttributes(mixed $raw): array
+    {
+        $a = is_string($raw) ? json_decode($raw, true) : $raw;
+        return is_array($a) ? $a : [];
+    }
+
+    /** Краткая строка характеристик для карточки: «2018 · 64 000 км · Автомат». */
+    private static function specs(array $r): string
+    {
+        if ($r['category_id'] === null) {
+            return '';
+        }
+        $parts = [];
+        foreach (Attribute::display((int) $r['category_id'], self::decodeAttributes($r['attributes'] ?? null)) as $a) {
+            $def = array_values(array_filter(Attribute::forCategory((int) $r['category_id']), static fn($d) => $d['code'] === $a['code']))[0] ?? null;
+            if ($def && in_array($def['type'], ['number', 'select'], true)) {
+                $parts[] = $a['value'];
+            }
+            if (count($parts) === 3) {
+                break;
+            }
+        }
+        return implode(' · ', $parts);
     }
 
     /**
@@ -164,6 +203,11 @@ final class Ad
 
         $ad = self::card($row, $isOwner || $isAdmin);
         $ad['description'] = $row['description'];
+        $ad['user_id']     = (int) $row['user_id'];
+        $attrs = self::decodeAttributes($row['attributes']);
+        $ad['attributes']      = $attrs;
+        $ad['attribute_list']  = $row['category_id'] !== null ? Attribute::display((int) $row['category_id'], $attrs) : [];
+        $ad['is_favorite']     = $viewer !== null && Favorite::has((int) $viewer['id'], $id);
         $ad['is_owner']    = $isOwner;
         $ad['can_edit']    = $isOwner && $row['status'] !== 'blocked';
         $ad['images']      = array_map(static fn(array $i) => [
@@ -188,20 +232,6 @@ final class Ad
             throw new HttpException('Объявление не найдено', 404);
         }
         return $phone !== '' ? Format::phone($phone) : null;
-    }
-
-    /**
-     * Увеличивает счётчик просмотров, не считая повторные заходы в одной сессии.
-     * @return bool true, если просмотр засчитан
-     */
-    public static function recordView(int $id): bool
-    {
-        if (isset($_SESSION['viewed'][$id])) {
-            return false;
-        }
-        $_SESSION['viewed'][$id] = true;
-        Database::run('UPDATE ads SET views = views + 1 WHERE id = ?', [$id]);
-        return true;
     }
 
     /**
@@ -254,9 +284,10 @@ final class Ad
         $pdo->beginTransaction();
         try {
             $adId = Database::insert(
-                "INSERT INTO ads (user_id, category_id, title, description, price, city, status)
-                 VALUES (?, ?, ?, ?, ?, ?, 'pending')",
-                [$userId, $data['category_id'], $data['title'], $data['description'], $data['price'], $data['city']]
+                "INSERT INTO ads (user_id, category_id, title, description, price, city, status, attributes)
+                 VALUES (?, ?, ?, ?, ?, ?, 'pending', ?::jsonb)",
+                [$userId, $data['category_id'], $data['title'], $data['description'], $data['price'], $data['city'],
+                 json_encode($data['attributes'], JSON_UNESCAPED_UNICODE | JSON_FORCE_OBJECT)]
             );
             foreach ($data['images'] as $filename) {
                 Database::run('INSERT INTO ad_images (ad_id, filename) VALUES (?, ?)', [$adId, $filename]);
@@ -291,10 +322,11 @@ final class Ad
         $pdo->beginTransaction();
         try {
             Database::run(
-                "UPDATE ads SET category_id = ?, title = ?, description = ?, price = ?, city = ?,
+                "UPDATE ads SET category_id = ?, title = ?, description = ?, price = ?, city = ?, attributes = ?::jsonb,
                                 status = 'pending', rejection_reason = NULL, updated_at = NOW()
                  WHERE id = ?",
-                [$data['category_id'], $data['title'], $data['description'], $data['price'], $data['city'], $id]
+                [$data['category_id'], $data['title'], $data['description'], $data['price'], $data['city'],
+                 json_encode($data['attributes'], JSON_UNESCAPED_UNICODE | JSON_FORCE_OBJECT), $id]
             );
             $removed = array_diff($current, $data['images']);
             $added   = array_diff($data['images'], $current);
@@ -334,7 +366,7 @@ final class Ad
     /**
      * Проверяет поля формы объявления.
      * @param string[] $attached файлы, уже привязанные к редактируемому объявлению
-     * @return array{title:string,description:string,price:int,city:string,category_id:int,images:string[]}
+     * @return array{title:string,description:string,price:int,city:string,category_id:int,attributes:array,images:string[]}
      */
     private static function validate(array $input, array $attached): array
     {
@@ -361,6 +393,14 @@ final class Ad
             }
         }
         $errors = $v->errors();
+
+        // Характеристики зависят от категории (марка/год для авто, бренд/состояние для техники …)
+        $attributes = [];
+        if (!isset($errors['category_id'])) {
+            $rawAttrs = is_array($input['attributes'] ?? null) ? $input['attributes'] : [];
+            $attributes = Attribute::validate((int) $v->value('category_id'), $rawAttrs, $errors);
+        }
+
         if (count($images) < 1) {
             $errors['images'] = 'Добавьте хотя бы одно фото';
         } elseif (count($images) > self::MAX_IMAGES) {
@@ -384,6 +424,7 @@ final class Ad
             'price'       => (int) $v->value('price'),
             'city'        => $v->value('city'),
             'category_id' => (int) $v->value('category_id'),
+            'attributes'  => $attributes,
             'images'      => $images,
         ];
     }

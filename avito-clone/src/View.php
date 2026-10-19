@@ -27,19 +27,59 @@ final class View
         ];
         self::$opts = $o;
         $user = Auth::user();
-        $unread = $user ? Message::unreadCount((int) $user['id']) : 0;
-        $client = [
-            'csrf' => Csrf::token(),
-            'user' => User::forClient($user),
-        ];
+        $unread = $user ? Chat::unreadTotal((int) $user['id']) : 0;
+        $client = self::clientData($user, $unread);
         $cats = $o['categories'] ? self::categories() : [];
         require BASE_PATH . '/templates/header.php';
     }
 
-    /** Закрывает страницу: подвал, нижняя навигация для мобильных, скрипты. */
-    public static function footer(): void
+    /** Данные для window.__APP__ (CSRF, пользователь, настройки realtime и VK). */
+    public static function clientData(?array $user, int $unread = 0): array
+    {
+        return [
+            'csrf'   => Csrf::token(),
+            'user'   => User::forClient($user),
+            'unread' => $unread,
+            'ws'     => ['url' => Realtime::publicUrl(), 'port' => Realtime::publicPort()],
+            'vk'     => VkAuth::enabled(),
+            'flash'  => self::pullFlash(),
+        ];
+    }
+
+    /** Одноразовые сообщения между редиректами (ошибка входа через VK, «профиль сохранён» и т. п.). */
+    private static function pullFlash(): array
+    {
+        $flash = ['error' => $_SESSION['flash_error'] ?? null, 'ok' => $_SESSION['flash_ok'] ?? null];
+        unset($_SESSION['flash_error'], $_SESSION['flash_ok']);
+        return $flash;
+    }
+
+    /** Скрипт, выставляющий тему до отрисовки страницы (без «вспышки» светлой темы). */
+    public static function themeScript(): string
+    {
+        return "<script>(function(){try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.setAttribute('data-theme',t)}catch(e){}})()</script>";
+    }
+
+    /** Аватар: фото или буква. */
+    public static function avatar(?array $u, string $class = ''): string
+    {
+        $name = (string) ($u['name'] ?? '?');
+        $url  = $u['avatar_url'] ?? ($u['avatar'] ?? null);
+        $cls  = trim('avatar ' . $class);
+        if (!empty($url)) {
+            return '<span class="' . e($cls) . ' avatar--img"><img src="' . e((string) $url) . '" alt="" referrerpolicy="no-referrer"></span>';
+        }
+        return '<span class="' . e($cls) . '">' . e(mb_strtoupper(mb_substr($name, 0, 1))) . '</span>';
+    }
+
+    /**
+     * Закрывает страницу: подвал, нижняя навигация для мобильных, скрипты.
+     * @param string[] $scripts дополнительные скрипты страницы (после app.js), например ['/assets/js/chat.js']
+     */
+    public static function footer(array $scripts = []): void
     {
         $user = Auth::user();
+        $unread = $user ? Chat::unreadTotal((int) $user['id']) : 0;
         $page = self::$opts['page'] ?? '';
         require BASE_PATH . '/templates/footer.php';
     }

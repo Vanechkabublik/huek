@@ -31,6 +31,7 @@ $form = [
     'price'       => $edit ? (string) $edit['price'] : '',
     'city'        => $edit['city'] ?? '',
     'description' => $edit['description'] ?? '',
+    'attributes'  => $edit['attributes'] ?? new stdClass(),
     'images'      => array_map(static fn(array $i) => ['filename' => $i['filename'], 'url' => $i['thumb']], $edit['images'] ?? []),
 ];
 
@@ -81,12 +82,15 @@ View::header([
                 </div>
             </div>
 
+            <div class="attrs" id="attrBox" hidden>
+                <h2 class="attrs__title" id="attrTitle">Характеристики</h2>
+                <div class="attrs__grid" id="attrFields"></div>
+            </div>
+
             <div class="field">
                 <label class="field__label" for="city">Город</label>
-                <input class="input" id="city" name="city" type="text" list="cityList" maxlength="80" placeholder="Например, Москва" autocomplete="off" required>
-                <datalist id="cityList">
-                    <?php foreach ($cities as $city): ?><option value="<?= e($city) ?>"><?php endforeach; ?>
-                </datalist>
+                <input class="input" id="city" name="city" type="text" maxlength="80" placeholder="Начните вводить: Москва, Казань…" autocomplete="off" required
+                       data-city-input data-known-cities="<?= e(View::json($cities)) ?>">
                 <p class="field__error" data-error-for="city"></p>
             </div>
 

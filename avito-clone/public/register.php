@@ -47,6 +47,11 @@ View::header(['title' => 'Регистрация', 'page' => 'register', 'catego
             <button class="btn btn--primary btn--lg btn--block" type="submit">Создать аккаунт</button>
         </form>
 
+        <?php if (App\VkAuth::enabled()): ?>
+            <div class="auth__or"><span>или</span></div>
+            <a class="btn btn--vk btn--lg btn--block" href="/vk-login.php"><span class="vk-mark">VK</span>Зарегистрироваться через VK</a>
+        <?php endif; ?>
+
         <p class="auth__switch">Уже есть аккаунт? <a href="/login.php">Войти</a></p>
     </div>
 </main>

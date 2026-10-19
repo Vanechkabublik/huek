@@ -39,6 +39,34 @@ final class Format
         return date('Y', $ts) === date('Y') ? $label : $label . ' ' . date('Y', $ts);
     }
 
+    /** Компактная дата для списков: «14:05» (сегодня), «Вчера», «12 окт», «12 окт 2025». */
+    public static function short(string $datetime): string
+    {
+        $ts = strtotime($datetime);
+        if ($ts === false) {
+            return '';
+        }
+        $today = strtotime('today');
+        if ($ts >= $today) {
+            return date('H:i', $ts);
+        }
+        if ($ts >= $today - 86400) {
+            return 'Вчера';
+        }
+        $label = (int) date('j', $ts) . ' ' . self::MONTHS_SHORT[(int) date('n', $ts) - 1];
+        return date('Y', $ts) === date('Y') ? $label : $label . ' ' . date('Y', $ts);
+    }
+
+    /** Момент времени в ISO-8601 с часовым поясом — браузер сам покажет его в местном времени. */
+    public static function iso(?string $datetime): ?string
+    {
+        if ($datetime === null || $datetime === '') {
+            return null;
+        }
+        $ts = strtotime($datetime);
+        return $ts === false ? null : date('c', $ts);
+    }
+
     /** «27 октября 2025, 14:05» — для админских таблиц и полной даты. */
     public static function dateFull(string $datetime): string
     {

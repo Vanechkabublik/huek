@@ -16,6 +16,7 @@ final class Upload
     public const MAX_PIXELS = 25_000_000;        // ~5000×5000: защита от «бомб» с огромным разрешением
     public const MAX_SIDE   = 1600;              // длинная сторона основного фото
     public const THUMB_SIDE = 640;               // длинная сторона миниатюры
+    public const AVATAR_SIDE = 256;              // сторона квадратного аватара
 
     private const ALLOWED = [
         'image/jpeg' => IMAGETYPE_JPEG,
@@ -29,6 +30,60 @@ final class Upload
      * @return array{filename:string,url:string,thumb:string}
      */
     public static function store(array $file): array
+    {
+        $src = self::loadValidated($file);
+        self::ensureDir();
+
+        $name = bin2hex(random_bytes(12)) . '.jpg';
+        $ok = self::saveResized($src, UPLOAD_DIR . '/' . $name, self::MAX_SIDE, 85)
+            && self::saveResized($src, UPLOAD_DIR . '/t_' . $name, self::THUMB_SIDE, 80);
+        imagedestroy($src);
+        if (!$ok) {
+            self::remove($name);
+            throw new HttpException('Не удалось сохранить файл', 500);
+        }
+
+        $_SESSION['pending_uploads'][$name] = time();
+        return ['filename' => $name, 'url' => self::url($name), 'thumb' => self::thumbUrl($name)];
+    }
+
+    /**
+     * Аватар: квадрат 256×256 по центру кадра. Возвращает URL вида /uploads/av_<hex>.jpg.
+     */
+    public static function storeAvatar(array $file): string
+    {
+        $src = self::loadValidated($file);
+        self::ensureDir();
+
+        $w = imagesx($src);
+        $h = imagesy($src);
+        $side = min($w, $h);
+        $canvas = imagecreatetruecolor(self::AVATAR_SIDE, self::AVATAR_SIDE);
+        imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+        imagecopyresampled($canvas, $src, 0, 0, intdiv($w - $side, 2), intdiv($h - $side, 2), self::AVATAR_SIDE, self::AVATAR_SIDE, $side, $side);
+        imagedestroy($src);
+
+        $name = 'av_' . bin2hex(random_bytes(12)) . '.jpg';
+        imageinterlace($canvas, true);
+        $ok = imagejpeg($canvas, UPLOAD_DIR . '/' . $name, 88);
+        imagedestroy($canvas);
+        if (!$ok) {
+            throw new HttpException('Не удалось сохранить файл', 500);
+        }
+        @chmod(UPLOAD_DIR . '/' . $name, 0644);
+        return self::url($name);
+    }
+
+    /** Удаляет файл аватара, если он наш (а не внешний URL из VK). */
+    public static function removeAvatarUrl(?string $url): void
+    {
+        if ($url !== null && str_starts_with($url, UPLOAD_URL . '/av_')) {
+            self::remove(basename($url));
+        }
+    }
+
+    /** Общая проверка загрузки: ошибки PHP, размер, MIME по содержимому, разрешение, EXIF-поворот. */
+    private static function loadValidated(array $file): \GdImage
     {
         self::assertUploaded($file);
 
@@ -57,22 +112,14 @@ final class Upload
         if ($mime === 'image/jpeg') {
             $src = self::applyExifOrientation($src, $tmp);
         }
+        return $src;
+    }
 
+    private static function ensureDir(): void
+    {
         if (!is_dir(UPLOAD_DIR) && !mkdir(UPLOAD_DIR, 0775, true) && !is_dir(UPLOAD_DIR)) {
             throw new HttpException('Не удалось сохранить файл', 500);
         }
-
-        $name = bin2hex(random_bytes(12)) . '.jpg';
-        $ok = self::saveResized($src, UPLOAD_DIR . '/' . $name, self::MAX_SIDE, 85)
-            && self::saveResized($src, UPLOAD_DIR . '/t_' . $name, self::THUMB_SIDE, 80);
-        imagedestroy($src);
-        if (!$ok) {
-            self::remove($name);
-            throw new HttpException('Не удалось сохранить файл', 500);
-        }
-
-        $_SESSION['pending_uploads'][$name] = time();
-        return ['filename' => $name, 'url' => self::url($name), 'thumb' => self::thumbUrl($name)];
     }
 
     /** Файл загружен пользователем в текущей сессии и ещё не привязан к объявлению. */
@@ -102,10 +149,10 @@ final class Upload
         unset($_SESSION['pending_uploads'][$filename]);
     }
 
-    /** Имя сгенерировано нами (защита от path traversal и от удаления чужих файлов). */
+    /** Имя сгенерировано нами (защита от path traversal и от удаления чужих файлов): фото или аватар. */
     public static function isManaged(string $filename): bool
     {
-        return (bool) preg_match('/^[a-f0-9]{24}\.jpg$/', $filename);
+        return (bool) preg_match('/^(av_)?[a-f0-9]{24}\.jpg$/', $filename);
     }
 
     public static function url(string $filename): string

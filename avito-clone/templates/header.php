@@ -16,7 +16,10 @@ $q = $isIndex ? (string) ($_GET['q'] ?? '') : '';
     <title><?= e($o['title']) ?> — <?= e(APP_NAME) ?></title>
     <meta name="description" content="<?= e($o['description']) ?>">
     <meta name="theme-color" content="#00aaff">
+    <meta name="color-scheme" content="light dark">
     <meta name="csrf-token" content="<?= e($client['csrf']) ?>">
+    <?= View::themeScript() ?>
+
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2300aaff'/%3E%3Ctext x='16' y='23' font-family='Arial' font-size='20' font-weight='700' text-anchor='middle' fill='white'%3E%D0%90%3C/text%3E%3Ccircle cx='26' cy='7' r='4' fill='%23ffc700'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,6 +45,13 @@ $q = $isIndex ? (string) ($_GET['q'] ?? '') : '';
 
         <nav class="header__actions" aria-label="Основная навигация">
             <a class="header__link header__link--text" href="/my-ads.php">Мои объявления</a>
+            <a class="icon-link header__fav" href="/favorites.php" title="Избранное" aria-label="Избранное"><?= View::icon('heart') ?></a>
+            <a class="icon-link header__chat" href="/chat.php" title="Сообщения" aria-label="Сообщения">
+                <?= View::icon('message') ?><span class="dot-badge" id="chatBadge"<?= $unread > 0 ? '' : ' hidden' ?>><?= $unread > 9 ? '9+' : $unread ?></span>
+            </a>
+            <button class="icon-link theme-toggle" type="button" id="themeToggle" title="Сменить тему" aria-label="Сменить тему">
+                <?= View::icon('moon', 'theme-toggle__moon') ?><?= View::icon('sun', 'theme-toggle__sun') ?>
+            </button>
             <a class="btn btn--primary header__create" href="/create-ad.php">
                 <?= View::icon('plus') ?><span>Разместить объявление</span>
             </a>
@@ -49,17 +59,18 @@ $q = $isIndex ? (string) ($_GET['q'] ?? '') : '';
             <?php if ($user): ?>
                 <div class="user-menu" id="userMenu">
                     <button class="user-menu__btn" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Меню профиля">
-                        <span class="avatar"><?= e(mb_strtoupper(mb_substr($user['name'], 0, 1))) ?></span>
-                        <?php if ($unread > 0): ?><span class="dot-badge"><?= $unread > 9 ? '9+' : $unread ?></span><?php endif; ?>
+                        <?= View::avatar($user) ?>
                     </button>
                     <div class="user-menu__dropdown" role="menu">
                         <div class="user-menu__head">
                             <strong><?= e($user['name']) ?></strong>
-                            <span><?= e($user['email']) ?></span>
+                            <span><?= e($user['email'] ?? 'Вход через VK') ?></span>
                         </div>
+                        <a href="/profile.php" role="menuitem"><?= View::icon('settings') ?>Профиль и настройки</a>
                         <a href="/my-ads.php" role="menuitem"><?= View::icon('list') ?>Мои объявления</a>
-                        <a href="/messages.php" role="menuitem"><?= View::icon('message') ?>Сообщения
-                            <?php if ($unread > 0): ?><span class="pill-count"><?= $unread ?></span><?php endif; ?></a>
+                        <a href="/favorites.php" role="menuitem"><?= View::icon('heart') ?>Избранное</a>
+                        <a href="/chat.php" role="menuitem"><?= View::icon('message') ?>Сообщения<span class="pill-count" id="menuChatCount"<?= $unread > 0 ? '' : ' hidden' ?>><?= $unread ?></span></a>
+                        <a href="/seller.php?id=<?= (int) $user['id'] ?>" role="menuitem"><?= View::icon('user') ?>Мой публичный профиль</a>
                         <?php if ($user['role'] === 'admin'): ?>
                             <a href="/admin.php" role="menuitem"><?= View::icon('shield') ?>Админ-панель</a>
                         <?php endif; ?>

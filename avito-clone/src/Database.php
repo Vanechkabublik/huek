@@ -17,6 +17,12 @@ final class Database
     {
     }
 
+    /** Сбрасывает соединение (долгоживущие процессы — WS-сервер — переподключаются после обрыва). */
+    public static function reset(): void
+    {
+        self::$pdo = null;
+    }
+
     public static function pdo(): PDO
     {
         if (self::$pdo === null) {
