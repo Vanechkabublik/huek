@@ -95,12 +95,15 @@ INSERT INTO favorites (user_id, ad_id, created_at) VALUES
 (3, 1, NOW() - INTERVAL '3 hours'), (3, 3, NOW() - INTERVAL '2 days'), (3, 7, NOW() - INTERVAL '1 day');
 
 -- Статистика: уникальные просмотры за последние дни (по числу просмотров объявления)
+WITH v AS (
+    SELECT a.id AS ad_id, 'vseed' || a.id || '_' || g.n AS viewer_key,
+           NOW() - LEAST(NOW() - a.created_at, INTERVAL '13 days') * random() AS ts
+    FROM ads a
+    CROSS JOIN LATERAL generate_series(1, a.views) AS g(n)
+    WHERE a.status = 'approved'
+)
 INSERT INTO ad_views (ad_id, viewer_key, first_seen, last_seen)
-SELECT a.id, 'vseed' || a.id || '_' || g.n, t.ts, t.ts
-FROM ads a
-CROSS JOIN LATERAL generate_series(1, a.views) AS g(n)
-CROSS JOIN LATERAL (SELECT NOW() - LEAST(NOW() - a.created_at, INTERVAL '13 days') * random() AS ts) AS t
-WHERE a.status = 'approved';
+SELECT ad_id, viewer_key, ts, ts FROM v;
 
 INSERT INTO ad_contacts (ad_id, viewer_key, type, created_at)
 SELECT a.id, 'vseed' || a.id || '_' || g.n, 'phone', NOW() - LEAST(NOW() - a.created_at, INTERVAL '10 days') * random()

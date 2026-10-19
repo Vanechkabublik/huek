@@ -12,7 +12,7 @@
     const B = window.Board;
     const { APP, $, $$, el, icon, apiGet, apiPost, handleApiError, toast, realtime, setLoading, ApiError } = B;
 
-    const POLL_MS = 8000;
+    const POLL_MS = 5000;
     const timeFmt = new Intl.DateTimeFormat('ru', { hour: '2-digit', minute: '2-digit' });
     const dayFmt = new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'long' });
     const dayFmtYear = new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'long', year: 'numeric' });

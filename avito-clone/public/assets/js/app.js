@@ -511,16 +511,24 @@
         wrap.append(list);
         let items = [];
         let active = -1;
+        let muted = false;
 
         const norm = (s) => s.toLowerCase().replaceAll('ё', 'е');
         const close = () => { list.hidden = true; active = -1; };
-        const pick = (name) => { input.value = name; input.dispatchEvent(new Event('input', { bubbles: true })); close(); };
+        const pick = (name) => {
+            input.value = name;
+            muted = true;                                   // событие input нужно форме (сброс ошибок), но не списку подсказок
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            muted = false;
+            close();
+        };
         const highlight = () => $$('.suggest__item', list).forEach((n, i) => {
             n.classList.toggle('is-active', i === active);
             if (i === active) n.scrollIntoView({ block: 'nearest' });
         });
 
         async function render() {
+            if (muted) return;
             const q = norm(input.value.trim());
             const all = await loadCities();
             const knownSet = new Set(known);
@@ -599,7 +607,7 @@
                 title.textContent = `${d.label}: ${s.label} — ${val}`;
                 rect.append(title);
             });
-            if (days.length <= 8 || i % 2 === 0 || i === days.length - 1) {
+            if (days.length <= 8 || (days.length - 1 - i) % 2 === 0) {   // подписи через одну, начиная с последнего дня
                 add('text', { x: m.l + i * group + group / 2, y: height - 8, 'text-anchor': 'middle' }, d.label);
             }
         });

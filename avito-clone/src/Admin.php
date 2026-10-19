@@ -433,7 +433,7 @@ final class Admin
             'header' => ['ID', 'Email', 'Имя', 'Телефон', 'Роль', 'Заблокирован', 'VK', 'Объявлений', 'Регистрация', 'Последний вход'],
             'rows'   => array_map(static fn(array $r) => [
                 $r['id'], $r['email'], $r['name'], $r['phone'], $r['role'], $r['is_blocked'] ? 'да' : 'нет',
-                $r['vk'] ? 'да' : 'нет', $r['ads_count'], $r['created_at'], $r['last_login_at'],
+                $r['vk'] ? 'да' : 'нет', $r['ads_count'], substr((string) $r['created_at'], 0, 19), substr((string) $r['last_login_at'], 0, 19),
             ], $rows),
         ];
     }
@@ -450,7 +450,7 @@ final class Admin
             'header' => ['ID', 'Заголовок', 'Категория', 'Цена, ₽', 'Город', 'Статус', 'Автор (email)', 'Просмотры', 'В избранном', 'Создано', 'Причина отказа'],
             'rows'   => array_map(static fn(array $r) => [
                 $r['id'], $r['title'], $r['category_name'] ?? '', $r['price'], $r['city'], Ad::STATUS_LABELS[$r['status']] ?? $r['status'],
-                $r['user_email'], $r['views'], $r['fav_count'], $r['created_at'], $r['rejection_reason'],
+                $r['user_email'], $r['views'], $r['fav_count'], substr((string) $r['created_at'], 0, 19), $r['rejection_reason'],
             ], $rows),
         ];
     }
