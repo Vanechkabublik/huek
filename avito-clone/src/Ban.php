@@ -146,6 +146,7 @@ final class Ban
             'UPDATE users SET is_blocked = 1, ban_reason = ?, banned_at = NOW(), banned_until = ?, banned_by = ? WHERE id = ?',
             [$reason !== '' ? $reason : null, $until, (int) $actor['id'], $userId]
         );
+        Realtime::publish('kick', ['user' => $userId]);      // обрываем звонок и соединения чата заблокированного
         $banned = [];
         if ($alsoIps) {
             $u = Database::one('SELECT signup_ip, last_ip FROM users WHERE id = ?', [$userId]) ?? [];

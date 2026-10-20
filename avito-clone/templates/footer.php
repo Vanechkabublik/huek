@@ -36,6 +36,9 @@ use App\View;
 <div id="modalRoot"></div>
 
 <script src="<?= e(View::asset('/assets/js/app.js')) ?>" defer></script>
+<?php if ($user): ?>
+<script src="<?= e(View::asset('/assets/js/calls.js')) ?>" defer></script>
+<?php endif; ?>
 <?php foreach ($scripts as $src): ?>
 <script src="<?= e(View::asset($src)) ?>" defer></script>
 <?php endforeach; ?>

@@ -26,10 +26,11 @@ final class Chat
     private static function summarySql(int $me): string
     {
         return "SELECT c.id, c.ad_id, c.buyer_id, c.seller_id, c.last_message_at,
-                       a.title AS ad_title, a.price AS ad_price, a.status AS ad_status,
+                       a.title AS ad_title, a.price AS ad_price, a.status AS ad_status, a.contact_method AS ad_method,
+                       EXISTS (SELECT 1 FROM chat_messages t WHERE t.conversation_id = c.id AND t.kind = 'text') AS has_text,
                        (SELECT filename FROM ad_images WHERE ad_id = a.id ORDER BY id LIMIT 1) AS cover,
-                       p.id AS peer_id, p.name AS peer_name, p.avatar_url AS peer_avatar,
-                       lm.id AS last_id, lm.body AS last_body, lm.sender_id AS last_sender,
+                       p.id AS peer_id, p.name AS peer_name, p.avatar_url AS peer_avatar, p.is_blocked AS peer_blocked,
+                       lm.id AS last_id, lm.kind AS last_kind, lm.body AS last_body, lm.sender_id AS last_sender,
                        lm.created_at AS last_at, lm.read_at AS last_read,
                        (SELECT COUNT(*) FROM chat_messages m
                         WHERE m.conversation_id = c.id AND m.sender_id <> $me AND m.read_at IS NULL) AS unread
@@ -37,7 +38,7 @@ final class Chat
                 JOIN ads a ON a.id = c.ad_id
                 JOIN users p ON p.id = CASE WHEN c.buyer_id = $me THEN c.seller_id ELSE c.buyer_id END
                 LEFT JOIN LATERAL (
-                    SELECT id, body, sender_id, created_at, read_at FROM chat_messages
+                    SELECT id, kind, body, sender_id, created_at, read_at FROM chat_messages
                     WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1
                 ) lm ON TRUE";
     }
@@ -68,6 +69,7 @@ final class Chat
         if ($r['last_id'] !== null) {
             $last = [
                 'id'        => (int) $r['last_id'],
+                'kind'      => $r['last_kind'],
                 'body'      => mb_strlen($r['last_body']) > 140 ? mb_substr($r['last_body'], 0, 140) . '…' : $r['last_body'],
                 'mine'      => (int) $r['last_sender'] === $me,
                 'at'        => Format::iso($r['last_at']),
@@ -86,6 +88,9 @@ final class Chat
                 'status'     => $r['ad_status'],
                 'url'        => '/ad.php?id=' . (int) $r['ad_id'],
             ],
+            // Что разрешено в этом диалоге: звонки (если автор не выбрал «только сообщения») и текст (если автор не выбрал «только звонок»)
+            'can_call'  => Calls::denyReason(['status' => $r['ad_status'], 'contact_method' => $r['ad_method']]) === null && !$r['peer_blocked'],
+            'can_write' => !($r['ad_method'] === 'phone' && !$r['has_text']),
             'peer'    => [
                 'id'      => (int) $r['peer_id'],
                 'name'    => $r['peer_name'],
@@ -167,6 +172,8 @@ final class Chat
                 'avatar'  => $ad['peer_avatar'] ?: null,
                 'url'     => '/seller.php?id=' . (int) $ad['peer_id'],
             ],
+            'can_call'  => Calls::denyReason($ad) === null,
+            'can_write' => true,
             'last'   => null,
             'unread' => 0,
         ];
@@ -187,7 +194,7 @@ final class Chat
             $params[] = $before;
         }
         $rows = Database::all(
-            "SELECT id, conversation_id, sender_id, body, created_at, read_at FROM chat_messages
+            "SELECT id, conversation_id, sender_id, body, kind, meta, created_at, read_at FROM chat_messages
              WHERE conversation_id = ?$cond ORDER BY id DESC LIMIT " . ($limit + 1),
             $params
         );
@@ -204,6 +211,8 @@ final class Chat
             'conversation_id' => (int) $r['conversation_id'],
             'sender_id'       => (int) $r['sender_id'],
             'body'            => $r['body'],
+            'kind'            => $r['kind'] ?? 'text',
+            'meta'            => !empty($r['meta']) ? json_decode((string) $r['meta'], true) : null,
             'created_at'      => Format::iso($r['created_at']),
             'read_at'         => Format::iso($r['read_at']),
             'read'            => $r['read_at'] !== null,
@@ -212,7 +221,7 @@ final class Chat
 
     public static function messageById(int $id): ?array
     {
-        $r = Database::one('SELECT id, conversation_id, sender_id, body, created_at, read_at FROM chat_messages WHERE id = ?', [$id]);
+        $r = Database::one('SELECT id, conversation_id, sender_id, body, kind, meta, created_at, read_at FROM chat_messages WHERE id = ?', [$id]);
         return $r ? self::formatMessage($r) : null;
     }
 
@@ -267,6 +276,12 @@ final class Chat
                     );
                 }
                 $conv = self::requireMember($existing, $userId);
+            }
+
+            // «Только звонок»: диалог, созданный звонком, остаётся без текста
+            $method = Database::value('SELECT contact_method FROM ads WHERE id = ?', [(int) $conv['ad_id']]);
+            if ($method === 'phone' && Database::value("SELECT 1 FROM chat_messages WHERE conversation_id = ? AND kind = 'text' LIMIT 1", [(int) $conv['id']]) === null) {
+                throw new HttpException('Автор принимает только звонки', 403);
             }
 
             $msgId = Database::insert(

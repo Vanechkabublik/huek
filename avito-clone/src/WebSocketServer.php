@@ -13,7 +13,8 @@ namespace App;
  *     сервер слушает канал (LISTEN) и рассылает события нужным пользователям:
  *       message — новое сообщение (+ строка диалога для списка), unread — счётчик непрочитанных,
  *       read    — собеседник прочитал ваши сообщения, typing — собеседник печатает.
- *  Клиент → сервер приходят только {"t":"ping"} и {"t":"typing","c":<id диалога>}; отправка сообщений — обычным HTTP.
+ *  Клиент → сервер приходят {"t":"ping"}, {"t":"typing","c":<id диалога>} и {"t":"call",…} (сигнализация звонков, см. CallManager);
+ *  отправка сообщений — обычным HTTP.
  */
 final class WebSocketServer
 {
@@ -40,9 +41,16 @@ final class WebSocketServer
     private bool $listening = false;
     /** @var array<int,array{0:array,1:int}> кэш участников диалога: convId → [строка, время] */
     private array $convCache = [];
+    private CallManager $calls;
 
     public function __construct(private string $host, private int $port)
     {
+        $this->calls = new CallManager(
+            fn(int $cid, array $m) => $this->sendTo($cid, $m),
+            fn(int $uid, array $m) => $this->sendToUser($uid, $m),
+            fn(int $uid): array => array_keys($this->byUser[$uid] ?? []),
+            fn(string $m) => $this->log($m),
+        );
         $origins = (string) getenv('WS_ALLOWED_ORIGINS');
         if ($origins === '' && (string) getenv('APP_URL') !== '') {
             $origins = (string) getenv('APP_URL');
@@ -118,7 +126,7 @@ final class WebSocketServer
         $this->clients[$id] = [
             'sock' => $conn, 'id' => $id, 'rbuf' => '', 'wbuf' => '', 'ws' => false, 'user' => null,
             'opened' => time(), 'last' => time(), 'pinged' => time(), 'frag' => null,
-            'msgs' => [], 'typingAt' => 0,
+            'msgs' => [], 'sigs' => [], 'typingAt' => 0,
         ];
     }
 
@@ -139,6 +147,9 @@ final class WebSocketServer
         }
         @fclose($c['sock']);
         unset($this->clients[$id]);
+        if ($c['user'] !== null) {
+            $this->calls->onClose($id, (int) $c['user']);
+        }
     }
 
     private function onReadable($sock): void
@@ -405,23 +416,29 @@ final class WebSocketServer
 
     private function onMessage(int $id, string $raw): void
     {
-        // Защита от флуда: не больше 30 сообщений за 10 секунд на соединение
-        $now = time();
-        $msgs = array_filter($this->clients[$id]['msgs'], static fn(int $t) => $t > $now - 10);
-        $msgs[] = $now;
-        $this->clients[$id]['msgs'] = $msgs;
-        if (count($msgs) > 30) {
-            $this->close($id, 1008);
-            return;
-        }
-
         $data = json_decode($raw, true);
         if (!is_array($data)) {
             return;
         }
+        // Защита от флуда. Обычные сообщения: не больше 30 за 10 секунд на соединение;
+        // служебные данные звонка (ICE-кандидатов бывает много) считаются отдельно и лимит у них выше.
+        $now = time();
+        $bucket = ($data['t'] ?? '') === 'call' && ($data['k'] ?? '') === 'sig' ? 'sigs' : 'msgs';
+        $limit = $bucket === 'sigs' ? 200 : 30;
+        $list = array_filter($this->clients[$id][$bucket], static fn(int $t) => $t > $now - 10);
+        $list[] = $now;
+        $this->clients[$id][$bucket] = $list;
+        if (count($list) > $limit) {
+            $this->close($id, 1008);
+            return;
+        }
+
         switch ($data['t'] ?? '') {
             case 'ping':
                 $this->sendTo($id, ['t' => 'pong']);
+                break;
+            case 'call':
+                $this->calls->handle($id, (int) $this->clients[$id]['user'], $data);
                 break;
             case 'typing':
                 $conv = (int) ($data['c'] ?? 0);
@@ -514,6 +531,14 @@ final class WebSocketServer
                         }
                     }
                     break;
+                case 'kick':
+                    // Пользователя заблокировали: рвём звонок и закрываем его соединения с чатом
+                    $uid = (int) $e['user'];
+                    $this->calls->kick($uid);
+                    foreach (array_keys($this->byUser[$uid] ?? []) as $cid) {
+                        $this->close($cid, 1008);
+                    }
+                    break;
                 case 'read':
                     $reader = (int) $e['reader'];
                     $peer   = (int) $e['peer'];
@@ -538,6 +563,7 @@ final class WebSocketServer
             return;
         }
         $this->lastHousekeeping = $now;
+        $this->calls->tick();
         $t = time();
         foreach ($this->clients as $id => $c) {
             if (!$c['ws']) {

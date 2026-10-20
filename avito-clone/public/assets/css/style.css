@@ -1475,3 +1475,145 @@ body.body-soft .footer { background: transparent; border-top-color: transparent;
 .legal-editor .form-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .alert--ban p + p { margin-top: 4px; }
 .alert--ban .muted { color: inherit; opacity: 0.8; }
+
+/* 21. Звонки (голос и видео) ---------------------------------------------------------------------------- */
+.thread__calls { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.thread__calls + .thread__ad { margin-left: 8px; }
+.thread__call { color: var(--blue-700); }
+.thread__call:disabled { opacity: 0.35; cursor: not-allowed; }
+.thread__call:disabled:hover { background: transparent; }
+.buy-card__calls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.buy-card__calls .btn { white-space: nowrap; }
+
+.bubble--call { white-space: normal; padding-bottom: 6px; min-width: min(260px, 100%); }
+.callmsg { display: flex; align-items: center; gap: 12px; }
+.callmsg__ico { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 50%; background: rgba(127, 127, 127, 0.18); }
+.callmsg__ico .icon { width: 19px; height: 19px; }
+.callmsg__text { display: grid; gap: 1px; min-width: 0; }
+.callmsg__text span { font-size: 12.5px; opacity: 0.75; }
+.callmsg__again { margin-left: auto; padding: 5px 10px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; opacity: 0.85; }
+.callmsg__again:hover { opacity: 1; }
+.bubble--call.is-missed .callmsg__ico { background: rgba(220, 38, 38, 0.14); color: #dc2626; }
+.bubble--call.is-missed .callmsg__text b { color: #dc2626; }
+.composer--off { align-items: center; gap: 10px; color: var(--muted); font-size: 14px; }
+.composer--off .icon { width: 18px; height: 18px; flex: none; }
+
+.call {
+    position: fixed; inset: 0; z-index: 400; display: grid; place-items: center; padding: 16px;
+    background: rgba(5, 8, 14, 0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    color: #fff; animation: call-in 0.18s ease-out;
+}
+@keyframes call-in { from { opacity: 0; } to { opacity: 1; } }
+.call button:not([hidden]) { font-family: inherit; }
+.call__panel {
+    position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(100%, 440px); height: min(620px, calc(100dvh - 32px));
+    border-radius: 20px; background: #0e131c; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.07); overflow: hidden;
+}
+.call[data-mode="video"] .call__panel { width: min(100%, 980px); height: min(660px, calc(100dvh - 32px)); }
+
+.call__top { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #0e131c; z-index: 3; }
+.call__title { display: grid; flex: 1; min-width: 0; line-height: 1.25; }
+.call__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 700; }
+.call__sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #8b97ab; }
+.call__tool { display: inline-grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 10px; background: transparent; color: #aab4c5; cursor: pointer; }
+.call__tool:hover { background: rgba(255, 255, 255, 0.09); color: #fff; }
+.call__tool .icon { width: 18px; height: 18px; }
+.call__mini { display: none; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: #cfd7e4; }
+
+/* значок пинга: четыре «палочки» и число миллисекунд */
+.call__ping {
+    display: inline-flex; align-items: center; gap: 7px; flex: none; height: 28px; padding: 0 10px 0 8px; border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px; background: rgba(255, 255, 255, 0.06); color: #d6dde9; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.call__ping:hover { background: rgba(255, 255, 255, 0.12); }
+.call__ping[hidden] { display: none; }
+.ping__bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.ping__bars i { display: block; width: 3px; border-radius: 1px; background: rgba(255, 255, 255, 0.25); }
+.ping__bars .b1 { height: 5px; } .ping__bars .b2 { height: 8px; } .ping__bars .b3 { height: 11px; } .ping__bars .b4 { height: 14px; }
+.ping__bars i.on { background: #34d399; }
+.call__ping[data-q="2"] .ping__bars i.on { background: #fbbf24; }
+.call__ping[data-q="1"] .ping__bars i.on { background: #f87171; }
+
+.call__details {
+    position: absolute; top: 52px; left: 12px; z-index: 6; min-width: 260px; max-width: calc(100% - 24px); padding: 8px 14px;
+    border-radius: 12px; background: #161d2a; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.call__details[hidden] { display: none; }
+.call__row { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; padding: 5px 0; font-size: 12.5px; color: #98a4b8; }
+.call__row + .call__row { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.call__row b { color: #fff; font-weight: 600; text-align: right; }
+
+.call__stage { position: relative; min-height: 0; background: #0a0e15; overflow: hidden; }
+.call__remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; opacity: 0; pointer-events: none; }
+.call[data-remote="1"] .call__remote { opacity: 1; }
+.call__local {
+    position: absolute; right: 14px; bottom: 14px; z-index: 2; display: none; width: 168px; aspect-ratio: 4 / 3; object-fit: cover;
+    border: 2px solid rgba(255, 255, 255, 0.2); border-radius: 12px; background: #000; transform: scaleX(-1); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.call[data-local="1"] .call__local { display: block; }
+.call__idle { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; pointer-events: none; }
+.call__who { position: relative; }
+.avatar--call { width: 116px; height: 116px; font-size: 46px; background: #1f2a3d; color: #dbe5f5; }
+.call[data-state="ringing"] .avatar--call, .call[data-state="incoming"] .avatar--call, .call[data-state="starting"] .avatar--call { animation: call-pulse 1.6s ease-out infinite; }
+@keyframes call-pulse { 0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.5); } 100% { box-shadow: 0 0 0 28px rgba(96, 165, 250, 0); } }
+.call__status { font-size: 15px; color: #aab4c5; font-variant-numeric: tabular-nums; }
+.call__status.is-timer { color: #fff; font-size: 17px; font-weight: 600; }
+.call__status.is-warn { color: #fbbf24; }
+.call__note { padding: 5px 12px; border-radius: 999px; background: rgba(251, 191, 36, 0.12); color: #fbbf24; font-size: 12.5px; line-height: 1.35; }
+.call__note[hidden] { display: none; }
+/* пока идёт видео собеседника — статус и пометки уходят в угол и не закрывают картинку */
+.call[data-remote="1"] .call__idle { align-items: flex-start; justify-content: flex-start; padding: 14px; gap: 8px; }
+.call[data-remote="1"] .call__who { display: none; }
+.call[data-remote="1"] .call__status, .call[data-remote="1"] .call__note { background: rgba(0, 0, 0, 0.5); padding: 4px 11px; border-radius: 999px; font-size: 13px; }
+
+.call__controls { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); background: #0e131c; }
+.cbtn {
+    position: relative; display: inline-grid; place-items: center; width: 56px; height: 56px; border: 0; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12); color: #fff; cursor: pointer; transition: background 0.15s, transform 0.1s, filter 0.15s;
+}
+.cbtn:hover { background: rgba(255, 255, 255, 0.2); }
+.cbtn:active { transform: scale(0.94); }
+.cbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.cbtn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.cbtn .icon { width: 24px; height: 24px; }
+.cbtn__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.cbtn.is-off { background: #fff; color: #111827; }
+.cbtn.is-off:hover { background: #e5e9f0; }
+.cbtn--end, .cbtn--end:hover { background: #dc2626; color: #fff; }
+.cbtn--end:hover { filter: brightness(1.12); }
+.cbtn--end .icon { transform: rotate(135deg); }
+.cbtn--accept, .cbtn--accept:hover { background: #16a34a; color: #fff; }
+.cbtn--accept:hover { filter: brightness(1.12); }
+.cbtn[hidden], .call__tool[hidden], .call__controls [hidden] { display: none !important; }
+/* входящий вызов: крупные кнопки с подписями */
+.call[data-state="incoming"] .call__controls { gap: 12px; flex-wrap: wrap; }
+.call[data-state="incoming"] .cbtn { width: auto; height: 52px; padding: 0 22px; gap: 10px; border-radius: 999px; grid-auto-flow: column; }
+.call[data-state="incoming"] .cbtn__label { position: static; width: auto; height: auto; clip: auto; overflow: visible; font-size: 14.5px; font-weight: 600; }
+
+/* свёрнутый звонок: «таблетка» сверху по центру, разговор продолжается */
+.call[data-min="1"] { inset: auto; top: 10px; left: 50%; width: max-content; max-width: calc(100vw - 20px); padding: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; transform: translateX(-50%); }
+.call[data-min="1"] .call__panel { display: flex; align-items: center; width: auto; height: auto; padding: 5px 8px 5px 6px; border-radius: 999px; gap: 6px; }
+.call[data-min="1"] .call__top { padding: 0; background: none; gap: 8px; }
+.call[data-min="1"] .call__title { flex: none; }
+.call[data-min="1"] .call__sub, .call[data-min="1"] .call__details { display: none; }
+.call[data-min="1"] .call__mini { display: block; }
+.call[data-min="1"] .call__name { max-width: 120px; font-size: 13px; }
+.call[data-min="1"] .call__stage { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.call[data-min="1"] .call__controls { padding: 0; gap: 6px; background: none; }
+.call[data-min="1"] .cbtn { width: 34px; height: 34px; }
+.call[data-min="1"] .cbtn .icon { width: 17px; height: 17px; }
+.call[data-min="1"] .cbtn--cam, .call[data-min="1"] .cbtn--flip { display: none; }
+
+@media (max-width: 700px) {
+    .call { padding: 0; }
+    .call__panel, .call[data-mode="video"] .call__panel { width: 100%; height: 100dvh; border-radius: 0; }
+    .call__top { padding: calc(10px + env(safe-area-inset-top)) 12px 10px; }
+    .call__local { width: 108px; right: 10px; bottom: 10px; }
+    .cbtn { width: 58px; height: 58px; }
+    .call__controls { gap: 12px; }
+    .call[data-min="1"] { top: calc(8px + env(safe-area-inset-top)); }
+    .call[data-min="1"] .call__panel { height: auto; }
+    .call[data-min="1"] .call__top { padding: 0; }
+    .call[data-min="1"] .cbtn { width: 36px; height: 36px; }
+}
+@media (prefers-reduced-motion: reduce) { .call, .avatar--call { animation: none !important; } }

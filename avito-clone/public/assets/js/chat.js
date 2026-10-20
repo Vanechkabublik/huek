@@ -1,6 +1,8 @@
 /* ==========================================================================
    Чат: диалоги цепочками, статусы «прочитано / не прочитано», обновление в реальном времени.
 
+   Звонки (голос и видео) живут в calls.js (window.Board.calls); здесь — кнопки в шапке диалога и «пузырь» итога звонка.
+
    Транспорт:
      • отправка и «прочитано» — обычные POST-запросы (api/chat.php): так работают CSRF и все проверки;
      • входящие события приходят по WebSocket (bin/ws-server.php): message, read, read_self, typing, unread;
@@ -20,6 +22,8 @@
     const avatarEl = (peer, cls = '') => peer.avatar
         ? el('span', { class: `avatar avatar--img ${cls}`.trim() }, el('img', { src: peer.avatar, alt: '', referrerpolicy: 'no-referrer' }))
         : el('span', { class: `avatar ${cls}`.trim() }, peer.initial);
+
+    const clockText = (sec) => `${Math.floor((sec || 0) / 60)}:${String((sec || 0) % 60).padStart(2, '0')}`;
 
     /** Время для списка диалогов в часовом поясе браузера (так же, как в самой переписке). */
     function shortTime(iso) {
@@ -109,7 +113,34 @@
         const nearBottom = () => ui.body && ui.body.scrollHeight - ui.body.scrollTop - ui.body.clientHeight < 120;
         const toBottom = () => { if (ui.body) ui.body.scrollTop = ui.body.scrollHeight; };
 
+        /** Итог звонка в переписке: «Исходящий звонок · 2:31», «Пропущенный звонок» и кнопка «Перезвонить». */
+        function callBubble(m) {
+            const out = m.sender_id === me;                       // я звонил
+            const meta = m.meta || {};
+            const state = meta.state;
+            const kind = meta.video ? 'Видеозвонок' : 'Звонок';
+            let title;
+            let sub = '';
+            let miss = false;
+            if (state === 'ended') { title = out ? `Исходящий ${kind.toLowerCase()}` : `Входящий ${kind.toLowerCase()}`; sub = clockText(meta.duration); }
+            else if (state === 'declined') title = out ? `${kind} отклонён` : `Вы отклонили ${kind.toLowerCase()}`;
+            else if (state === 'failed') title = 'Не удалось соединиться';
+            else {
+                miss = !out;
+                title = out ? (meta.reason === 'offline' ? 'Собеседник не в сети' : meta.reason === 'busy' ? 'Собеседник был занят' : 'Нет ответа') : `Пропущенный ${kind.toLowerCase()}`;
+            }
+            const canCall = active && active.can_call !== false;
+            const again = canCall ? el('button', { class: 'callmsg__again', type: 'button', onClick: () => startCall(Boolean(meta.video)) }, 'Перезвонить') : null;
+            return el('div', { class: `bubble bubble--call ${out ? 'bubble--out' : 'bubble--in'}${miss ? ' is-missed' : ''}`, 'data-id': m.id },
+                el('div', { class: 'callmsg' },
+                    el('span', { class: 'callmsg__ico' }, icon(miss ? 'phone-missed' : (meta.video ? 'video' : 'phone'))),
+                    el('div', { class: 'callmsg__text' }, el('b', {}, title), sub ? el('span', {}, sub) : null),
+                    again),
+                el('div', { class: 'bubble__meta' }, timeFmt.format(new Date(m.created_at))));
+        }
+
         function bubbleNode(m) {
+            if (m.kind === 'call') return callBubble(m);
             const out = m.sender_id === me;
             const time = timeFmt.format(new Date(m.created_at));
             const meta = el('div', { class: 'bubble__meta' }, time);
@@ -140,7 +171,7 @@
                 nodes.push(bubbleNode(m));
             });
             // Подпись статуса под последним моим сообщением
-            const lastMine = [...msgs].reverse().find((m) => m.sender_id === me);
+            const lastMine = [...msgs].reverse().find((m) => m.sender_id === me && m.kind !== 'call');
             if (lastMine && lastMine === msgs[msgs.length - 1] && !String(lastMine.id).startsWith('tmp')) {
                 nodes.push(el('div', { class: `read-label${lastMine.read ? ' is-read' : ''}` }, lastMine.read ? 'Прочитано' : 'Не прочитано'));
             }
@@ -156,12 +187,22 @@
             const adLink = el('a', { class: 'thread__ad', href: c.ad.url },
                 el('span', { class: 'thread__ad-img' }, c.ad.cover ? el('img', { src: c.ad.cover, alt: '' }) : null),
                 el('span', { class: 't' }, el('b', {}, c.ad.title), el('small', {}, c.ad.price_text)));
+            const canCall = c.can_call !== false;
+            const callBtn = (video) => el('button', {
+                class: 'icon-btn thread__call', type: 'button', disabled: !canCall,
+                'aria-label': video ? 'Видеозвонок' : 'Позвонить через сайт',
+                title: canCall ? (video ? 'Видеозвонок' : 'Позвонить через сайт') : 'Звонки недоступны для этого объявления',
+                onClick: () => startCall(video),
+            }, icon(video ? 'video' : 'phone'));
+            const calls = el('div', { class: 'thread__calls' }, callBtn(false), callBtn(true));
             const body = el('div', { class: 'thread__body' });
             const banner = el('div', { class: 'chat__banner', hidden: true }, 'Нет соединения в реальном времени — обновляем сообщения автоматически');
 
             const input = el('textarea', { class: 'composer__input', rows: 1, maxlength: 2000, placeholder: 'Напишите сообщение…', 'aria-label': 'Сообщение' });
             const send = el('button', { class: 'btn btn--primary composer__send', type: 'submit', 'aria-label': 'Отправить' }, icon('send'));
-            const composer = el('form', { class: 'composer' }, input, send);
+            const composer = c.can_write === false
+                ? el('div', { class: 'composer composer--off' }, icon('phone'), el('span', {}, 'Автор принимает только звонки — используйте кнопки в шапке диалога.'))
+                : el('form', { class: 'composer' }, input, send);
 
             const autosize = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; };
             input.addEventListener('input', () => {
@@ -177,10 +218,15 @@
             });
             composer.addEventListener('submit', (e) => { e.preventDefault(); submit(input, send, autosize); });
 
-            threadBox.replaceChildren(el('div', { class: 'thread' }, el('div', { class: 'thread__head' }, back, peer, adLink), banner, body, composer));
+            threadBox.replaceChildren(el('div', { class: 'thread' }, el('div', { class: 'thread__head' }, back, peer, calls, adLink), banner, body, composer));
             ui = { body, input, sub, banner, send };
             ui.banner.hidden = realtime.isOpen;
-            input.focus({ preventScroll: true });
+            if (c.can_write !== false) input.focus({ preventScroll: true });
+        }
+
+        function startCall(video) {
+            if (!active || !window.Board.calls) return;
+            window.Board.calls.start({ conv: active.id || 0, ad: active.id ? 0 : active.ad.id, video, peer: active.peer });
         }
 
         async function openConversation(id, { adId = 0 } = {}) {
@@ -273,6 +319,11 @@
 
         realtime.on('message', ({ conversation, message }) => {
             upsertConv(conversation);
+            // Диалог мог появиться из-за звонка со страницы объявления, пока открыт «черновик»
+            if (active && active.id === null && conversation && conversation.ad.id === active.ad.id) {
+                active = conversation;
+                history.replaceState(null, '', `/chat.php?c=${active.id}`);
+            }
             if (active && active.id === message.conversation_id) {
                 if (!msgs.some((m) => m.id === message.id)) {
                     const stick = nearBottom() || message.sender_id === me;

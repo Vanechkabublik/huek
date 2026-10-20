@@ -1056,6 +1056,17 @@
             });
         }
 
+        // --- звонок через сайт (голос / видео): гостя отправляем входить
+        [['callBtn', false], ['videoCallBtn', true]].forEach(([id, video]) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.addEventListener('click', () => {
+                if (!APP.user) { location.href = '/login.php?next=' + encodeURIComponent(location.pathname + location.search); return; }
+                if (!window.Board.calls) { toast('Звонки пока недоступны', 'warning'); return; }
+                window.Board.calls.start({ ad: adId, video });
+            });
+        });
+
         // --- поделиться
         $('#shareBtn').addEventListener('click', async () => {
             const url = location.href.split('#')[0];

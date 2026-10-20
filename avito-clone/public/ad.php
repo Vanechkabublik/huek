@@ -140,6 +140,16 @@ View::header([
                                 <?= View::icon('message') ?>Написать сообщение
                             </a>
                         <?php endif; ?>
+                        <?php if ($method !== 'chat' && $ad['status'] === 'approved'): /* бесплатный звонок через сайт: голос и видео */ ?>
+                            <div class="buy-card__calls" id="callBox">
+                                <button class="btn btn--outline btn--lg" type="button" id="callBtn" data-ad="<?= $ad['id'] ?>" title="Бесплатный звонок через сайт">
+                                    <?= View::icon('phone') ?><span>Позвонить онлайн</span>
+                                </button>
+                                <button class="btn btn--outline btn--lg" type="button" id="videoCallBtn" data-ad="<?= $ad['id'] ?>" title="Видеозвонок через сайт" aria-label="Видеозвонок">
+                                    <?= View::icon('video') ?><span>Видео</span>
+                                </button>
+                            </div>
+                        <?php endif; ?>
                     </div>
                     <?php if ($method !== 'any' || !empty($ad['contact_hours'])): ?>
                         <ul class="contact-note">

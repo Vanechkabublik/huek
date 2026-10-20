@@ -9,11 +9,13 @@ declare(strict_types=1);
  *   POST ?action=read    conversation_id    — пометить входящие прочитанными
  *   GET  ?action=ticket                     — тикет для подключения к WebSocket
  *   GET  ?action=unread                     — общее число непрочитанных
+ *   GET  ?action=ice                        — серверы STUN/TURN для звонков (временные логин и пароль TURN)
  */
 
 require __DIR__ . '/../../src/bootstrap.php';
 
 use App\Auth;
+use App\Calls;
 use App\Chat;
 use App\HttpException;
 use App\Realtime;
@@ -58,6 +60,9 @@ switch (Request::action('list')) {
 
     case 'unread':
         Response::ok(['unread' => Chat::unreadTotal($me)]);
+
+    case 'ice':
+        Response::ok(Calls::iceConfig($me));
 
     default:
         throw new HttpException('Неизвестное действие', 404);
