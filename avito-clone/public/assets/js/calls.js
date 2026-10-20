@@ -73,11 +73,13 @@
             o.start(t0);
             o.stop(t0 + dur + 0.02);
         }
+        // Браузер разрешает вибрацию только после касания страницы пользователем — иначе пишет предупреждение в консоль
+        const canVibrate = () => Boolean(navigator.vibrate) && (!navigator.userActivation || navigator.userActivation.hasBeenActive);
         function stop() {
             clearInterval(timer);
             clearInterval(vib);
             timer = vib = null;
-            if (navigator.vibrate) navigator.vibrate(0);
+            if (canVibrate()) navigator.vibrate(0);
         }
         function start(kind) {
             stop();
@@ -86,7 +88,7 @@
                 : () => beep(425, 0, 1.0, 0.05);
             play();
             timer = setInterval(play, kind === 'in' ? 3000 : 4000);
-            if (kind === 'in' && navigator.vibrate) {
+            if (kind === 'in' && canVibrate()) {
                 const v = () => navigator.vibrate([350, 200, 350]);
                 v();
                 vib = setInterval(v, 3000);
@@ -796,7 +798,8 @@
     window.addEventListener('beforeunload', (e) => {
         if (S && ['connecting', 'active'].includes(S.state)) { e.preventDefault(); e.returnValue = ''; }
     });
-    window.addEventListener('pagehide', () => { if (S && S.id) sendWs({ k: 'end', id: S.id }); });
+    // Звонящий или участник разговора ушёл со страницы — отбой. Входящий вызов страницей не отклоняется: после обновления он вернётся (sync)
+    window.addEventListener('pagehide', () => { if (S && S.id && S.state !== 'incoming') sendWs({ k: 'end', id: S.id }); });
 
     window.Board.calls = {
         start,

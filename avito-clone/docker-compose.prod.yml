@@ -18,6 +18,10 @@ x-app-env: &app-env
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
   GEOCODER_URL: ${GEOCODER_URL:-}
   TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+  TURN_SECRET: ${TURN_SECRET:-}               # звонки: общий секрет с coturn (временные логины TURN для браузеров)
+  TURN_HOST: ${TURN_HOST:-}                   # пусто — берётся домен из APP_URL
+  TURN_PORT: ${TURN_PORT:-3478}
+  CALLS_RELAY_ONLY: ${CALLS_RELAY_ONLY:-}     # 1 — все звонки через сервер: собеседники не видят IP друг друга
   WS_PORT: "8081"
   WS_PUBLIC_URL: ${WS_PUBLIC_URL:-}
 
@@ -53,6 +57,36 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # TURN-сервер для звонков: ретранслирует звук и видео, когда прямое соединение между браузерами невозможно
+  # (мобильные сети, строгий NAT — около каждого пятого звонка). Работает в сети хоста: Docker NAT ломает диапазон
+  # портов ретрансляции. В брандмауэре сервера (и у хостинга) нужны: 3478 UDP и TCP, TURN_MIN_PORT–TURN_MAX_PORT UDP.
+  # Секрет общий с приложением (TURN_SECRET); внутренние адреса (10.x, 192.168.x, 127.x…) через TURN недоступны.
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_REALM: ${DOMAIN:-board.local}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      TURN_PORT: ${TURN_PORT:-3478}
+      TURN_MIN_PORT: ${TURN_MIN_PORT:-49160}
+      TURN_MAX_PORT: ${TURN_MAX_PORT:-49200}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        [ -n "$$TURN_SECRET" ] || { echo "TURN_SECRET не задан в .env — звонки через сервер не заработают"; exit 1; }
+        DENY=""
+        for r in 0.0.0.0-0.255.255.255 10.0.0.0-10.255.255.255 100.64.0.0-100.127.255.255 127.0.0.0-127.255.255.255 \
+                 169.254.0.0-169.254.255.255 172.16.0.0-172.31.255.255 192.0.0.0-192.0.0.255 192.168.0.0-192.168.255.255 \
+                 198.18.0.0-198.19.255.255 240.0.0.0-255.255.255.255; do DENY="$$DENY --denied-peer-ip=$$r"; done
+        EXT=""; [ -n "$$TURN_EXTERNAL_IP" ] && EXT="--external-ip=$$TURN_EXTERNAL_IP"
+        exec turnserver -n --log-file=stdout --simple-log --no-software-attribute \
+          --realm="$$TURN_REALM" --use-auth-secret --static-auth-secret="$$TURN_SECRET" \
+          --listening-port="$$TURN_PORT" --min-port="$$TURN_MIN_PORT" --max-port="$$TURN_MAX_PORT" \
+          --fingerprint --stale-nonce --no-cli --no-tls --no-dtls --no-multicast-peers --no-tcp-relay \
+          --user-quota=12 --total-quota=300 $$EXT $$DENY
 
   # WebSocket чата: Caddy / nginx проксируют на него путь /ws
   ws:

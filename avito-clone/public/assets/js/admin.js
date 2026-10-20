@@ -110,6 +110,7 @@
                     tile('blue', 'tag', 'Категорий', s.categories, '#/categories'),
                     tile('blue', 'message', 'Диалогов в чате', `${s.chats}`, '#/stats'),
                     tile('yellow', 'send', 'Сообщений', s.messages, '#/stats'),
+                    tile('green', 'phone', 'Звонков состоялось', s.calls, '#/stats'),
                     tile('yellow', 'star', 'Отзывов', s.reviews, '#/reviews')),
                 el('div', { class: 'admin-grid' },
                     el('div', { class: 'panel-card' }, el('div', { class: 'panel-card__head' }, el('h2', {}, 'Новые пользователи и объявления'),

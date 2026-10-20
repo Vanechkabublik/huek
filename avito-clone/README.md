@@ -79,6 +79,9 @@ cp .env.example .env                # поменять порты/пароли/�
 - **Чат цепочками** (`/chat.php`): диалог = объявление + покупатель; список диалогов со счётчиками, двухпанельный интерфейс
   (на телефоне — список → переписка); у своих сообщений статусы **«Не прочитано» / «Прочитано»** (одна/две галочки, время прочтения в подсказке);
   «печатает…», счётчик непрочитанных в шапке, нижней навигации и в заголовке вкладки, всплывающее уведомление о новом сообщении.
+- **Звонки голосом и видео** прямо с сайта (WebRTC): кнопки в чате и на странице объявления, микрофон и камера включаются/выключаются в любой момент,
+  в углу окна — значок с **пингом** и подробностями связи, входящий вызов виден на любой странице, окно можно свернуть; итог звонка попадает в переписку
+  («Исходящий звонок · 2:31», «Пропущенный звонок»). Если прямое соединение невозможно, звук и видео идут через TURN-сервер coturn. Подробнее — [docs/CALLS.md](docs/CALLS.md).
 - **Отзывы** о продавце (1–5 звёзд + текст): оставить может тот, кто переписывался с продавцом в чате (защита от накрутки), один отзыв на продавца — повторная отправка обновляет его.
 - Профиль (`/profile.php`): имя, email, телефон, **город**, «о себе», аватар (перекодируется в 256×256), смена пароля, привязка/отвязка аккаунтов Яндекса и Google.
 
@@ -134,7 +137,7 @@ avito-clone/
 │   ├── server-update.sh          # обновление боевого сервера одной командой (git pull, .env, пересборка, nginx /ws)
 │   └── setup-oauth.sh            # ввод ключей Яндекса/Google со скрытым вводом, запись в .env, перезапуск
 ├── database/
-│   ├── migrations/  001_base.sql … 004_oauth_identities.sql  005_security_legal_geo.sql
+│   ├── migrations/  001_base.sql … 004_oauth_identities.sql  005_security_legal_geo.sql  006_calls.sql
 │   └── seed/demo.sql             # демо-данные
 ├── docker/
 │   ├── php/  Dockerfile  entrypoint.sh  router.php  php.ini      # лёгкий образ на Alpine
@@ -146,6 +149,7 @@ avito-clone/
 │   ├── Client.php  Ban.php  Security.php  Geo.php  Legal.php  Settings.php   # реальный IP/UA, баны, журнал входов, город, документы, настройки сайта
 │   ├── Ad.php  Attribute.php  Category.php  Favorite.php  Review.php  Stats.php   # объявления, характеристики, избранное, отзывы, счётчики
 │   ├── Chat.php  Realtime.php  WebSocketServer.php          # чат, события, WS-сервер
+│   ├── Calls.php  CallManager.php                           # звонки: правила, TURN-доступ, сигнализация в WS-сервере
 │   ├── Admin.php  Audit.php  Upload.php                     # админка, журнал, загрузка фото/аватаров
 │   └── Validator.php  Response.php  Request.php  HttpException.php  Format.php  View.php
 ├── templates/                    # header.php, footer.php, icons.php (SVG-спрайт иконок)
@@ -156,7 +160,7 @@ avito-clone/
     ├── api/  auth  listings  favorites  profile  reviews  chat  admin  upload  geo  (.php)     # JSON-эндпоинты
     ├── assets/fonts/             # Montserrat (OFL), assets/img/logo-mark.svg; favicon.ico/svg, apple-touch-icon, icon-192/512, site.webmanifest
     ├── assets/css/style.css      # дизайн-система (токены, светлая/тёмная тема, компоненты, адаптив)
-    ├── assets/js/  app.js  chat.js  admin.js     # клиентский код (общие помощники — window.Board)
+    ├── assets/js/  app.js  calls.js  chat.js  admin.js     # клиентский код (calls.js — звонки WebRTC) (общие помощники — window.Board)
     ├── assets/data/cities.json   # города для подсказок
     └── uploads/                  # фото и аватары (+ демо seed_*.svg)
 ```
@@ -177,7 +181,7 @@ avito-clone/
 | `api/favorites.php`   | `list` (GET) · `toggle` (POST)                                                                        |
 | `api/profile.php`     | POST: `update`, `avatar`, `avatar_delete`, `password`, `identity_unlink`                              |
 | `api/reviews.php`     | GET: `list`, `can` · POST: `save`, `delete`                                                           |
-| `api/chat.php`        | GET: `list`, `thread`, `ticket`, `unread` · POST: `send`, `read`                                      |
+| `api/chat.php`        | GET: `list`, `thread`, `ticket`, `unread`, `ice` (STUN/TURN для звонков) · POST: `send`, `read`        |
 | `api/upload.php`      | `upload` (фото), `video` (видеообзор, multipart `file`), `delete` (убрать превью до сохранения) — POST |
 | `api/geo.php`         | `resolve` (POST: lat, lon → город) · `set` (POST: выбрать город / «все города») · `current` (GET)      |
 | `api/admin.php`       | GET: `dashboard`, `stats`, `integrations`, `users`, `user_detail`, `ads`, `ad_detail`, `categories`, `attributes`, `reviews`, `audit`, `export_users`, `export_ads` · GET: `security`, `ip_bans`, `legal` · POST: `user_ban` (причина обязательна), `user_unban`, `ip_ban_add`, `ip_ban_delete`, `legal_save`, `settings_save`, `user_block`, `user_unblock`, `user_password`, `user_role`, `user_delete`, `ad_moderate`, `ad_delete`, `ads_bulk`, `category_create/update/delete`, `attribute_save/delete`, `review_delete` |
@@ -230,6 +234,9 @@ php -S 127.0.0.1:8080 -t public docker/php/router.php       # сайт
 - админка: дашборд, пользователи (поиск, карточка, блокировка, роль, удаление), массовая модерация, редактор характеристик, отзывы, журнал, CSV, раздел «Интеграции»;
 - согласие с политикой (регистрация, вход, OAuth), редактирование документов в админке, сохранение IP/User-Agent (включая попытку подделки `X-Forwarded-For`);
 - баны: аккаунт (причина и срок, сессия обрывается, причина видна при входе по email/Яндекс/Google, истечение, снятие), бан IP на вход и на весь сайт, защита от самоблокировки админа;
+- звонки (две вкладки с фейковой камерой и микрофоном): соединение, звук и видео в обе стороны (≥ 15 кадров/с, потери < 1 %, джиттер < 40 мс), микрофон и камера «на лету»,
+  пинг, отказ / отмена / таймаут / занято / «не в сети», обрыв WebSocket посреди разговора, уход со страницы, две вкладки получателя, звонок со страницы объявления,
+  правила «только звонок» и «только сообщения», лимит вызовов, мобильная вёрстка; отдельно — звонок строго через локальный TURN-сервер coturn;
 - определение города (разрешение, отказ, ручной выбор, профиль, форма объявления), способ связи и видеообзор (загрузка, проверки, замена/удаление файла, Range-запросы, чат отключён для «только звонок»);
 - адаптив 360–1440 px и светлая/тёмная тема на всех страницах без горизонтальной прокрутки, 404, robots.txt и sitemap.xml.
 
@@ -243,6 +250,8 @@ php -S 127.0.0.1:8080 -t public docker/php/router.php       # сайт
 - Поиск — `ILIKE`; для больших объёмов стоит добавить полнотекстовый индекс (`tsvector` + GIN).
 - WebSocket-сервер — один процесс на `stream_select` (хватает на сотни одновременных подключений); для тысяч нужен отдельный масштабируемый сервис.
 - Подсказки городов работают по встроенному списку; определение города по координатам идёт через публичный Nominatim (лимит ~1 запрос/сек) — для большой нагрузки нужен свой геокодер.
+- Звонки видны получателю, только пока сайт открыт в браузере (для звонков при закрытой вкладке нужны Web Push и service worker); работа на реальных мобильных сетях, iPhone и за корпоративными NAT
+  в этой среде не проверялась — после выкладки сделайте тестовый звонок между телефоном и компьютером (см. [docs/CALLS.md](docs/CALLS.md)).
 - Видеообзор не перекодируется (в образе нет ffmpeg): длительность проверяется только у MP4/MOV, превью-кадра нет — на карточке показывается фото. Для постера и сжатия добавьте ffmpeg.
 - Тексты политики и соглашения — шаблоны общего вида, они не заменяют юридическую консультацию.
 - Оплата и платные услуги (продвижение, ЮKassa) не реализованы.

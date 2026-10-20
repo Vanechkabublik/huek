@@ -3,7 +3,7 @@
 #   bash bin/server-update.sh
 # Ключи входа через Яндекс/Google задаются отдельным скриптом: bash bin/setup-oauth.sh
 # Что делает: git pull → дописывает недостающие ключи в .env (генерирует APP_SECRET) →
-# пересобирает и перезапускает app/ws/db (миграции БД применяются сами) →
+# пересобирает и перезапускает app/ws/db/coturn (миграции БД применяются сами; coturn — TURN-сервер для звонков) →
 # добавляет в nginx проксирование WebSocket (/ws), лимит загрузок 64m (видео) и X-Forwarded-For (реальный IP),
 # проверяет конфиг и перезагружает nginx.
 # Можно запускать повторно — все шаги идемпотентны.
@@ -39,13 +39,41 @@ fi
 for key in YANDEX_CLIENT_ID YANDEX_CLIENT_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
     grep -q "^${key}=" .env || set_env "$key" ""
 done
+# Звонки: общий секрет с TURN-сервером и его публичный IP
+if [ -z "$(get_env TURN_SECRET)" ]; then
+    set_env TURN_SECRET "$(openssl rand -hex 24)"
+    echo "TURN_SECRET сгенерирован"
+fi
+grep -q "^TURN_EXTERNAL_IP=" .env || set_env TURN_EXTERNAL_IP ""
+if [ -z "$(get_env TURN_EXTERNAL_IP)" ]; then
+    for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+        ip="$(curl -4 -fsS --max-time 6 "$url" 2>/dev/null | tr -d '[:space:]' || true)"
+        if printf '%s' "$ip" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+            set_env TURN_EXTERNAL_IP "$ip"
+            echo "Публичный IP сервера для звонков: $ip"
+            break
+        fi
+    done
+fi
 # Старые настройки входа через VK больше не нужны
 sed -i '/^VK_CLIENT_ID=/d;/^VK_SCOPE=/d' .env
 DOMAIN="$(get_env DOMAIN)"
 
-say "Собираю и перезапускаю контейнеры (app, ws, db)"
-"${COMPOSE[@]}" up -d --build app ws db
+say "Собираю и перезапускаю контейнеры (app, ws, db, coturn)"
+"${COMPOSE[@]}" up -d --build app ws db coturn
 "${COMPOSE[@]}" rm -sf caddy >/dev/null 2>&1 || true
+
+say "Брандмауэр: порты для звонков (TURN)"
+TURN_MIN="$(get_env TURN_MIN_PORT)"; TURN_MIN="${TURN_MIN:-49160}"
+TURN_MAX="$(get_env TURN_MAX_PORT)"; TURN_MAX="${TURN_MAX:-49200}"
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+    ufw allow 3478/udp >/dev/null && ufw allow 3478/tcp >/dev/null && ufw allow "${TURN_MIN}:${TURN_MAX}/udp" >/dev/null
+    echo "ufw: открыты 3478/udp, 3478/tcp и ${TURN_MIN}:${TURN_MAX}/udp"
+else
+    echo "ufw не активен — ничего не меняю."
+fi
+echo "ВАЖНО: если у хостинга есть свой брандмауэр (группы безопасности, «Firewall» в панели), откройте там:"
+echo "       3478 UDP и TCP, а также ${TURN_MIN}-${TURN_MAX} UDP — иначе звонки через сервер не заработают."
 
 say "Настраиваю nginx: WebSocket /ws"
 if [ ! -f "$NGINX_CONF" ]; then
@@ -127,6 +155,9 @@ fi
 
 say "Проверка"
 "${COMPOSE[@]}" ps
+if command -v ss >/dev/null 2>&1; then
+    ss -lun 2>/dev/null | grep -q ':3478 ' && echo "TURN-сервер слушает UDP 3478" || echo "ВНИМАНИЕ: coturn не слушает UDP 3478 — посмотрите логи: docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml logs coturn" >&2
+fi
 if [ -n "$DOMAIN" ]; then
     printf 'Сайт:      '; curl -s -o /dev/null -w '%{http_code}\n' "https://$DOMAIN/" || true
     printf 'WebSocket: '; curl -s -o /dev/null -w '%{http_code} (400/426 — это нормально без Upgrade, главное — не 502/404)\n' "https://$DOMAIN/ws" || true

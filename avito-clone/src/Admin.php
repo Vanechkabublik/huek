@@ -34,7 +34,8 @@ final class Admin
             'categories' => (int) Database::value('SELECT COUNT(*) FROM categories'),
             'reviews'    => (int) Database::value('SELECT COUNT(*) FROM reviews'),
             'chats'      => (int) Database::value('SELECT COUNT(*) FROM conversations'),
-            'messages'   => (int) Database::value('SELECT COUNT(*) FROM chat_messages'),
+            'messages'   => (int) Database::value("SELECT COUNT(*) FROM chat_messages WHERE kind = 'text'"),
+            'calls'      => (int) Database::value("SELECT COUNT(*) FROM chat_messages WHERE kind = 'call' AND meta->>'state' = 'ended'"),
         ];
     }
 
@@ -96,7 +97,7 @@ final class Admin
             "SELECT d::date AS day,
                     (SELECT COUNT(*) FROM users u WHERE u.created_at::date = d::date) AS users,
                     (SELECT COUNT(*) FROM ads a WHERE a.created_at::date = d::date) AS ads,
-                    (SELECT COUNT(*) FROM chat_messages m WHERE m.created_at::date = d::date) AS messages
+                    (SELECT COUNT(*) FROM chat_messages m WHERE m.created_at::date = d::date AND m.kind = 'text') AS messages
              FROM generate_series(CURRENT_DATE - 13, CURRENT_DATE, INTERVAL '1 day') AS d ORDER BY d"
         );
         $days = array_map(static function (array $r) use ($months) {

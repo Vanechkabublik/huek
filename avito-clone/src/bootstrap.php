@@ -27,6 +27,10 @@ spl_autoload_register(static function (string $class): void {
 mb_internal_encoding('UTF-8');
 date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'Europe/Moscow');
 header_remove('X-Powered-By');
+// Микрофон, камера и геолокация нужны только самому сайту (звонки, определение города); сторонним фреймам они закрыты
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    header('Permissions-Policy: microphone=(self), camera=(self), geolocation=(self)');
+}
 
 /** Экранирование вывода в HTML-шаблонах. */
 function e(?string $value): string
